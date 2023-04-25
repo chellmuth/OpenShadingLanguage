@@ -144,6 +144,7 @@ OptixRaytracer::load_ptx_file(string_view filename)
     std::vector<std::string> paths
         = { OIIO::Filesystem::parent_path(OIIO::Sysutil::this_program_path()),
             PTX_PATH };
+
     std::string filepath = OIIO::Filesystem::searchpath_find(filename, paths,
                                                              false);
     if (OIIO::Filesystem::exists(filepath)) {

@@ -990,6 +990,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_err(err)
     , m_statslevel(0)
     , m_lazylayers(true)
+    , m_max_local_groupdata_alloc(0)
     , m_lazyglobals(true)
     , m_lazyunconnected(true)
     , m_lazyerror(true)
@@ -1049,6 +1050,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_llvm_profiling_events(0)
     , m_llvm_output_bitcode(0)
     , m_llvm_dumpasm(0)
+    , m_fused_callable(false)
     , m_max_local_mem_KB(2048)
     , m_compile_report(0)
     , m_buffer_printf(true)
@@ -1507,6 +1509,7 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     ATTR_SET("statistics:level", int, m_statslevel);
     ATTR_SET("debug", int, m_debug);
     ATTR_SET("lazylayers", int, m_lazylayers);
+    ATTR_SET("max_local_groupdata_alloc", int, m_max_local_groupdata_alloc);
     ATTR_SET("lazyglobals", int, m_lazyglobals);
     ATTR_SET("lazyunconnected", int, m_lazyunconnected);
     ATTR_SET("lazyerror", int, m_lazyerror);
@@ -1563,6 +1566,7 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     ATTR_SET("relaxed_param_typecheck", int, m_relaxed_param_typecheck);
     ATTR_SET("countlayerexecs", int, m_countlayerexecs);
     ATTR_SET("max_warnings_per_thread", int, m_max_warnings_per_thread);
+    ATTR_SET("fused_callable", int, m_fused_callable);
     ATTR_SET("max_local_mem_KB", int, m_max_local_mem_KB);
     ATTR_SET("compile_report", int, m_compile_report);
     ATTR_SET("buffer_printf", int, m_buffer_printf);
@@ -1678,6 +1682,7 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE_STRING("searchpath:library", m_library_searchpath);
     ATTR_DECODE("statistics:level", int, m_statslevel);
     ATTR_DECODE("lazylayers", int, m_lazylayers);
+    ATTR_DECODE("max_local_groupdata_alloc", int, m_max_local_groupdata_alloc);
     ATTR_DECODE("lazyglobals", int, m_lazyglobals);
     ATTR_DECODE("lazyunconnected", int, m_lazyunconnected);
     ATTR_DECODE("lazy_userdata", int, m_lazy_userdata);
@@ -1742,6 +1747,7 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE_STRING("only_groupname", m_only_groupname);
     ATTR_DECODE_STRING("archive_groupname", m_archive_groupname);
     ATTR_DECODE_STRING("archive_filename", m_archive_filename);
+    ATTR_DECODE("fused_callable", int, m_fused_callable);
     ATTR_DECODE("max_local_mem_KB", int, m_max_local_mem_KB);
     ATTR_DECODE("compile_report", int, m_compile_report);
     ATTR_DECODE("buffer_printf", int, m_buffer_printf);
@@ -1986,16 +1992,17 @@ ShadingSystemImpl::getattribute(ShaderGroup* group, string_view name,
         return true;
     }
     if (name == "group_init_name" && type.basetype == TypeDesc::STRING) {
-        *(ustring*)val = ustring::fmtformat("__direct_callable__group_{}_init",
-                                            group->name());
+        *(ustring*)val = init_function_name(*this, *group);
         return true;
     }
     if (name == "group_entry_name" && type.basetype == TypeDesc::STRING) {
         int nlayers          = group->nlayers();
         ShaderInstance* inst = (*group)[nlayers - 1];
-        // This formulation mirrors OSOProcessorBase::layer_function_name()
-        *(ustring*)val = ustring::fmtformat("__direct_callable__{}_{}",
-                                            group->name(), inst->layername());
+        *(ustring*)val       = layer_function_name(*group, *inst, true);
+        return true;
+    }
+    if (name == "group_fused_name" && type.basetype == TypeDesc::STRING) {
+        *(ustring*)val = fused_function_name(*group);
         return true;
     }
     if (name == "layer_osofiles" && type.basetype == TypeDesc::STRING) {

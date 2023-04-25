@@ -672,6 +672,7 @@ public:
     bool no_pointcloud() const { return m_no_pointcloud; }
     bool force_derivs() const { return m_force_derivs; }
     bool allow_shader_replacement() const { return m_allow_shader_replacement; }
+    bool fused_callable() const { return m_fused_callable; }
     ustring commonspace_synonym() const
     {
         return m_shading_state_uniform.m_commonspace_synonym;
@@ -853,8 +854,9 @@ private:
         m_rs_bitcode;  ///> Container for the pre-compiled renderer services free function bitcode
 
     // Options
-    int m_statslevel;             ///< Statistics level
-    bool m_lazylayers;            ///< Evaluate layers on demand?
+    int m_statslevel;   ///< Statistics level
+    bool m_lazylayers;  ///< Evaluate layers on demand?
+    int m_max_local_groupdata_alloc;
     bool m_lazyglobals;           ///< Run lazily even if globals write?
     bool m_lazyunconnected;       ///< Run lazily even if not connected?
     bool m_lazyerror;             ///< Run lazily even if it has error op
@@ -922,6 +924,7 @@ private:
     std::vector<ustring> m_raytypes;          ///< Names of ray types
     std::vector<ustring> m_renderer_outputs;  ///< Names of renderer outputs
     std::vector<SymLocationDesc> m_symlocs;
+    bool m_fused_callable;
     int m_max_local_mem_KB;           ///< Local storage can a shader use
     int m_compile_report;             ///< Print compilation report?
     bool m_buffer_printf;             ///< Buffer/batch printf output?
@@ -2500,6 +2503,32 @@ struct NoiseParams {
 };
 
 
+// Mangle the group and layer into a unique function name
+static std::string
+layer_function_name(const ShaderGroup& group, const ShaderInstance& inst, bool groupentry=false)
+{
+    if (groupentry && !inst.shadingsys().fused_callable())
+        return fmtformat("__direct_callable__layer_group_{}_name_{}", group.name(), inst.layername());
+    else
+        return fmtformat("_osl_layer_group_{}_name_{}", group.name(), inst.layername());
+}
+
+static std::string
+init_function_name(const ShadingSystemImpl& shadingsys,
+                   const ShaderGroup& group)
+{
+    std::string prefix = shadingsys.fused_callable() ? "_osl_init_"
+                                                     : "__direct_callable__";
+
+    return fmtformat("{}init_group_{}", prefix, group.name());
+}
+
+static std::string
+fused_function_name(const ShaderGroup& group)
+{
+    return fmtformat("__direct_callable__fused_{}", group.name());
+}
+
 
 namespace pvt {
 
@@ -2604,17 +2633,6 @@ public:
 
     /// Return the basic block ID for the given instruction.
     int bblockid(int opnum) const { return m_bblockids[opnum]; }
-
-    // Mangle the group and layer into a unique function name
-    std::string layer_function_name(const ShaderGroup& group,
-                                    const ShaderInstance& inst)
-    {
-        return fmtformat("{}_{}", group.name(), inst.layername());
-    }
-    std::string layer_function_name()
-    {
-        return layer_function_name(group(), *inst());
-    }
 
 protected:
     ShadingSystemImpl& m_shadingsys;  ///< Backpointer to shading system

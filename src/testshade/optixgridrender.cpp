@@ -139,6 +139,7 @@ OptixGridRenderer::load_ptx_file(string_view filename)
     std::vector<std::string> paths
         = { OIIO::Filesystem::parent_path(OIIO::Sysutil::this_program_path()),
             PTX_PATH };
+
     std::string filepath = OIIO::Filesystem::searchpath_find(filename, paths,
                                                              false);
     if (OIIO::Filesystem::exists(filepath)) {
@@ -455,11 +456,13 @@ OptixGridRenderer::make_optix_materials()
             }
         }
 
-        std::string group_name, init_name, entry_name;
+        std::string group_name, init_name, entry_name, fused_name;
         shadingsys->getattribute(groupref.get(), "groupname", group_name);
         shadingsys->getattribute(groupref.get(), "group_init_name", init_name);
         shadingsys->getattribute(groupref.get(), "group_entry_name",
                                  entry_name);
+        shadingsys->getattribute(groupref.get(), "group_fused_name",
+                                 fused_name);
 
         // Retrieve the compiled ShaderGroup PTX
         std::string osl_ptx;
@@ -498,14 +501,16 @@ OptixGridRenderer::make_optix_materials()
         // Create 2x program groups (for direct callables)
         OptixProgramGroupOptions program_options = {};
         OptixProgramGroupDesc pgDesc[3]          = {};
+        // WIP: remove the two program descriptions when in fused mode.
+        // Currently just puts another fused copy in the init slot and never calls it
         pgDesc[0].kind               = OPTIX_PROGRAM_GROUP_KIND_CALLABLES;
         pgDesc[0].callables.moduleDC = optix_module;
-        pgDesc[0].callables.entryFunctionNameDC = init_name.c_str();
+        pgDesc[0].callables.entryFunctionNameDC = fused_name.c_str();
         pgDesc[0].callables.moduleCC            = 0;
         pgDesc[0].callables.entryFunctionNameCC = nullptr;
         pgDesc[1].kind               = OPTIX_PROGRAM_GROUP_KIND_CALLABLES;
         pgDesc[1].callables.moduleDC = optix_module;
-        pgDesc[1].callables.entryFunctionNameDC = entry_name.c_str();
+        pgDesc[1].callables.entryFunctionNameDC = fused_name.c_str();
         pgDesc[1].callables.moduleCC            = 0;
         pgDesc[1].callables.entryFunctionNameCC = nullptr;
 

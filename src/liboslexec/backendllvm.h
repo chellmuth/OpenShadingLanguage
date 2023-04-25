@@ -57,6 +57,7 @@ public:
 
     /// Create an llvm function for group initialization code.
     llvm::Function* build_llvm_init();
+    llvm::Function* build_llvm_fused();
 
     /// Build up LLVM IR code for the given range [begin,end) or
     /// opcodes, putting them (initially) into basic block bb (or the

@@ -853,8 +853,7 @@ BackendLLVM::build_llvm_init()
 {
     // Make a group init function: void group_init(ShaderGlobals*, GroupData*)
     // Note that the GroupData* is passed as a void*.
-    std::string unique_name = fmtformat("__direct_callable__group_{}_init",
-                                        group().name());
+    std::string unique_name = init_function_name(shadingsys(), group());
     ll.current_function(
         ll.make_function(unique_name, false,
                          ll.type_void(),  // return type
@@ -940,16 +939,75 @@ BackendLLVM::build_llvm_init()
     return ll.current_function();
 }
 
+//
+// Fused callable:
+//  With fused_callable=1, we replace the __direct_callable__ init and entry functions
+//  with a single __direct_callable__ that itself calls both init and entry.
+//
+//  With fused_callable=1 and max_local_groupdata_alloc > 0, the fused function will
+//  try to allocate a buffer for groupdata params on the stack. If the buffer requirement
+//  exceeds max_local_groupdata_alloc, it will skip allocation and instead forward the
+//  pointer passed in by the renderer.
+//
+//  With fused_callable=0, this function is never generated.
+//
 
+llvm::Function*
+BackendLLVM::build_llvm_fused(void)
+{
+    std::string fused_name = fused_function_name(group());
+
+    // Start building the fused function
+    ll.current_function(
+        ll.make_function(fused_name, false,
+                         ll.type_void(),  // return type
+                         { llvm_type_sg_ptr(), llvm_type_groupdata_ptr(),
+                           ll.type_void_ptr(),  // userdata_base_ptr
+                           ll.type_void_ptr(),  // output_base_ptr
+                           ll.type_int() }));
+
+    llvm::BasicBlock* entry_bb = ll.new_basic_block(fused_name);
+    ll.new_builder(entry_bb);
+
+    // If it fits, allocate a groupdata params buffer and overwrite the
+    // renderer-supplied pointer
+    llvm::Value* llvm_groupdata_ptr = ll.current_function_arg(1);
+
+    if (group().llvm_groupdata_size() < shadingsys().m_max_local_groupdata_alloc)
+        llvm_groupdata_ptr = ll.op_alloca(m_llvm_type_groupdata, 1,
+                                          "groupdata_buffer", 8);
+
+    llvm::Value* args[] = {
+        ll.current_function_arg(0), llvm_groupdata_ptr,
+        ll.current_function_arg(2), ll.current_function_arg(3),
+        ll.current_function_arg(4),
+    };
+
+    // Call init
+    std::string init_name = init_function_name(shadingsys(), group());
+    ll.call_function(init_name.c_str(), args);
+
+    int nlayers          = group().nlayers();
+    ShaderInstance* inst = group()[nlayers - 1];
+
+    // Call entry
+    std::string layer_name = layer_function_name(group(), *inst);
+    ll.call_function(layer_name.c_str(), args);
+
+    ll.op_return();
+
+    ll.end_builder();
+
+    return ll.current_function();
+}
 
 llvm::Function*
 BackendLLVM::build_llvm_instance(bool groupentry)
 {
     // Make a layer function: void layer_func(ShaderGlobals*, GroupData*)
     // Note that the GroupData* is passed as a void*.
-    std::string unique_layer_name = (groupentry ? "__direct_callable__" : "")
-                                    + layer_function_name();
-    bool is_entry_layer = group().is_entry_layer(layer());
+    std::string unique_layer_name = layer_function_name(group(), *inst(), groupentry);
+    bool is_entry_layer           = group().is_entry_layer(layer());
     ll.current_function(ll.make_function(
         unique_layer_name,
         !is_entry_layer,  // fastcall for non-entry layer functions
@@ -973,7 +1031,8 @@ BackendLLVM::build_llvm_instance(bool groupentry)
     m_llvm_shadeindex        = ll.current_function_arg(4);  //arg_it++;
 
     llvm::BasicBlock* entry_bb = ll.new_basic_block(unique_layer_name);
-    m_exit_instance_block      = NULL;
+
+    m_exit_instance_block = NULL;
 
     // Set up a new IR builder
     ll.new_builder(entry_bb);
@@ -1490,6 +1549,11 @@ BackendLLVM::run()
             funcs[layer]         = build_llvm_instance(is_single_entry);
         }
     }
+
+    llvm::Function* fused_func = nullptr;
+    if (shadingsys().fused_callable())
+        fused_func = build_llvm_fused();
+
     // llvm::Function* entry_func = group().num_entry_layers() ? NULL : funcs[m_num_used_layers-1];
     m_stat_llvm_irgen_time += timer.lap();
 
@@ -1520,6 +1584,8 @@ BackendLLVM::run()
         // merely internalizing.
         std::unordered_set<llvm::Function*> external_functions;
         external_functions.insert(init_func);
+        if (shadingsys().fused_callable())
+            external_functions.insert(fused_func);
         for (int layer = 0; layer < nlayers; ++layer) {
             llvm::Function* f = funcs[layer];
             // If we plan to call bitcode_string of a layer's function after

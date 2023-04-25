@@ -126,8 +126,8 @@ __raygen__()
     sg.renderstate          = &closure_pool[0];
 
     // Run the OSL group and init functions
-    optixDirectCall<void, ShaderGlobals*, void*, void*, void*, int>(
-        0u, &sg, params, nullptr, nullptr, 0);  // call osl_init_func
+    // optixDirectCall<void, ShaderGlobals*, void*, void*, void*, int>(
+    //     0u, &sg, params, nullptr, nullptr, 0);  // call osl_init_func
     optixDirectCall<void, ShaderGlobals*, void*, void*, void*, int>(
         1u, &sg, params, nullptr, nullptr, 0);  // call osl_group_func
 
