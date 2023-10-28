@@ -16,3 +16,4 @@ $ testshade -shader root root_layer
 $ dot -Tpng bblock--shader-unnamed_group_1--layer-root_layer.dot > cfg.png
 $ open cfg.png
 ```
+![CFG](cfg.png)
