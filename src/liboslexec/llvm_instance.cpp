@@ -1365,6 +1365,7 @@ BackendLLVM::build_llvm_instance(bool groupentry)
     // Mark all the basic blocks, including allocating llvm::BasicBlock
     // records for each.
     find_basic_blocks();
+    build_cfg();
     find_conditionals();
     m_call_layers_inserted.clear();
 

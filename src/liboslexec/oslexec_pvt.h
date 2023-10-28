@@ -2720,6 +2720,8 @@ public:
     /// instruction.  Within any basic bock, there are no jumps in or out.
     /// Also note which instructions are inside conditional states.
     void find_basic_blocks();
+    void build_cfg();
+    std::string build_bblock_label(int opnum);
 
     /// Will the op executed for-sure unconditionally every time the
     /// shader is run?  (Not inside a loop or conditional or after a

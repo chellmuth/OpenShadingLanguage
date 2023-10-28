@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <fstream>
 
 #include <OpenImageIO/sysutil.h>
 #include <OpenImageIO/thread.h>
@@ -1160,6 +1161,193 @@ OSOProcessorBase::find_basic_blocks()
             ++bbid;
         m_bblockids[opnum] = bbid;
     }
+}
+
+std::string OSOProcessorBase::build_bblock_label(int opnum)
+{
+    OpcodeVec& code(inst()->ops());
+    const int bblock_id = m_bblockids[opnum];
+
+    std::stringstream code_stream;
+    bool first = true;
+    while (opnum < code.size() && m_bblockids[opnum] == bblock_id)
+    {
+        if (!first)
+            code_stream << "<br align=\"left\" />";
+        first = false;
+
+        auto op = code[opnum];
+        code_stream << fmtformat("  ({}) {}", opnum, op.opname().c_str());
+        for (int a = 0; a < op.nargs(); ++a) {
+            const Symbol* s(inst()->argsymbol(op.firstarg() + a));
+            code_stream << fmtformat(" {}", s->name().c_str());
+        }
+        for (size_t j = 0; j < Opcode::max_jumps; ++j)
+            if (op.jump(j) >= 0)
+                code_stream << fmtformat(" %i", op.jump(j));
+
+        code_stream << fmtformat(" [filename = {} line = {}]",
+                                 op.sourcefile(), op.sourceline())
+                << std::endl;
+
+        opnum++;
+    }
+    code_stream << "<br align=\"left\" />";
+
+    std::stringstream sstream;
+    sstream << fmtformat(R"(
+<<table border="1" cellspacing="0" cellpadding="4">
+  <tr>
+    <td>block-{}</td>
+  </tr>
+  <tr>
+    <td align="left">{}</td>
+  </tr>
+</table>>)", bblock_id, code_stream.str());
+
+    return sstream.str();
+}
+
+void OSOProcessorBase::build_cfg()
+{
+    OpcodeVec& code(inst()->ops());
+
+    // for (int i = 0; i < code.size(); i++) {
+    //     printf(" (%i) op = %s, bblock_id = %i\n",
+    //            i, code[i].opname().c_str(), m_bblockids[i]);
+    // }
+
+    std::set<std::pair<int, int> > block_edges;
+
+    FOREACH_PARAM(const Symbol& s, inst())
+    {
+        if (s.has_init_ops() && s.initbegin() > 0)
+            block_edges.insert({
+                m_bblockids[s.initbegin() - 1],
+                m_bblockids[s.initbegin()]
+            });
+    }
+
+    {
+        int maincodebegin = inst()->maincodebegin();
+        if (maincodebegin != 0)
+            block_edges.insert({
+                m_bblockids[maincodebegin - 1],
+                m_bblockids[maincodebegin]
+            });
+    }
+
+    std::stack<int> function_stack;
+
+    // Record all jumps
+    for (size_t opnum = 0; opnum < code.size(); ++opnum) {
+        if (!function_stack.empty() && function_stack.top() == opnum)
+            function_stack.pop();
+
+        Opcode& op(code[opnum]);
+        if (op.opname() == u_if) {
+            {
+                int block_from = m_bblockids[opnum];
+                int block_to = m_bblockids[opnum + 1];
+                block_edges.insert({block_from, block_to});
+            }
+            {
+                int block_from = m_bblockids[opnum];
+                int block_to = m_bblockids[op.jump(0)];
+                block_edges.insert({block_from, block_to});
+            }
+            {
+                int block_from = m_bblockids[op.jump(0) - 1];
+                int block_to = m_bblockids[op.jump(1)];
+                block_edges.insert({block_from, block_to});
+            }
+            {
+                int block_from = m_bblockids[op.jump(1) - 1];
+                int block_to = m_bblockids[op.jump(1)];
+                block_edges.insert({block_from, block_to});
+            }
+        }
+        else if (op.opname() == u_for) {
+            int block_cur = m_bblockids[opnum];
+            int block_init_start = m_bblockids[opnum + 1];
+            int block_init_end = m_bblockids[op.jump(0) - 1];
+            int block_check_start = m_bblockids[op.jump(0)];
+            int block_check_end = m_bblockids[op.jump(1) - 1];
+            int block_body_start = m_bblockids[op.jump(1)];
+            int block_body_end = m_bblockids[op.jump(2) - 1];
+            int block_update_start = m_bblockids[op.jump(2)];
+            int block_update_end = m_bblockids[op.jump(3) - 1];
+            int block_done = m_bblockids[op.jump(3)];
+
+            block_edges.insert({block_cur, block_init_start});
+            block_edges.insert({block_init_end, block_check_start});
+
+            block_edges.insert({block_check_end, block_body_start});
+            block_edges.insert({block_check_end, block_done});
+
+            block_edges.insert({block_body_end, block_update_start});
+            block_edges.insert({block_update_end, block_check_start});
+        }
+        else if (op.opname() == u_functioncall) {
+            function_stack.push(op.jump(0));
+            int block_cur = m_bblockids[opnum];
+            int block_body_start = m_bblockids[opnum + 1];
+            int block_body_end = m_bblockids[op.jump(0) - 1];
+            int block_after = m_bblockids[op.jump(0)];
+
+            block_edges.insert({block_cur, block_body_start});
+            block_edges.insert({block_body_end, block_after});
+        }
+        else if (op.opname() == u_return) {
+            block_edges.insert({m_bblockids[opnum], m_bblockids[function_stack.top()]});
+        }
+        else if (op.jump(0) != -1) {
+            printf("UNHANDLED OP = %s\n", op.opname().c_str());
+            exit(1);
+        }
+    }
+
+    // // Record all fall-throughs
+    // for (size_t opnum = 1; opnum < code.size(); ++opnum) {
+    //     if (!block_begin[opnum])
+    //         continue;
+
+    //     Opcode& prev(code[opnum - 1]);
+    //     if (prev.jump(0) < 0) {
+    //         int block_from = m_bblockids[opnum - 1];
+    //         int block_to = m_bblockids[opnum];
+
+    //         block_edges.insert({block_from, block_to});
+    //     }
+    // }
+
+    std::string filename = fmtformat("bblock--shader-{}--layer-{}.dot",
+                                     group().name(), inst()->layername());
+    std::ofstream ostream;
+    ostream.open(filename);
+
+    ostream << "digraph TB {" << std::endl;
+    ostream << "  node [fontname=\"Courier\"]" << std::endl;
+
+    for (size_t opnum = 0; opnum < code.size(); ++opnum) {
+        if (opnum == 0 || m_bblockids[opnum] != m_bblockids[opnum - 1]) {
+            std::string label = build_bblock_label(opnum);
+            ostream << fmtformat("  bblock_{}[shape=none,label={}];",
+                                 m_bblockids[opnum], label)
+                    << std::endl;
+        }
+    }
+
+    for (auto &&edge : block_edges) {
+        ostream << fmtformat("  {} -> {};",
+                             fmtformat("bblock_{}", edge.first),
+                             fmtformat("bblock_{}", edge.second))
+                << std::endl;
+    }
+
+    ostream << "}" << std::endl;
+
+    ostream.close();
 }
 
 
