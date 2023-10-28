@@ -1184,7 +1184,7 @@ std::string OSOProcessorBase::build_bblock_label(int opnum)
         }
         for (size_t j = 0; j < Opcode::max_jumps; ++j)
             if (op.jump(j) >= 0)
-                code_stream << fmtformat(" %i", op.jump(j));
+                code_stream << fmtformat(" {}", op.jump(j));
 
         code_stream << fmtformat(" [filename = {} line = {}]",
                                  op.sourcefile(), op.sourceline())
