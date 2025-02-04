@@ -580,6 +580,19 @@ public:
         }
     };
 
+    virtual bool optix_cache_enabled() const { return false; }
+
+    virtual void optix_cache_insert(const std::string& key,
+                                    const std::string& value) const
+    {
+    }
+
+    virtual bool optix_cache_get(const std::string& key,
+                                 std::string& value) const
+    {
+        return false;
+    }
+
     /// A renderer may choose to support batched execution by providing pointers
     /// to objects satisfying the BatchedRendererServices<WidthOf<#>> interface
     /// for specific batch sizes.
