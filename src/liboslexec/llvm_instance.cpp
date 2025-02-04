@@ -2150,6 +2150,7 @@ BackendLLVM::run()
         ll.prune_and_internalize_module(external_functions);
     }
 
+
     // Debug code to dump the pre-optimized bitcode to a file
     if (llvm_debug() >= 2 || shadingsys().llvm_output_bitcode()) {
         // Make a safe group name that doesn't have "/" in it! Also beware
@@ -2279,6 +2280,13 @@ BackendLLVM::run()
         else
             group().llvm_compiled_version(
                 group().llvm_compiled_layer(nlayers - 1));
+    }
+
+    if (use_optix() && renderer()->optix_cache_enabled()) {
+        std::string cache_key = group().optix_cache_key();
+        renderer()->optix_cache_insert(
+            cache_key, optix_cache_wrap(group().m_llvm_ptx_compiled_version,
+                                        group().llvm_groupdata_size()));
     }
 
     // We are destroying the entire module below,
