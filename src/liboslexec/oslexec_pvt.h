@@ -78,6 +78,12 @@ struct PerThreadInfo {
 
 namespace pvt {
 
+void
+optix_cache_unwrap(const std::string& cache_value, std::string& ptx,
+                   size_t& groupdata_size);
+std::string
+optix_cache_wrap(const std::string& ptx, size_t groupdata_size);
+
 // forward definitions
 class ShadingSystemImpl;
 class ShaderInstance;
@@ -1735,6 +1741,9 @@ public:
     /// Return a reference to the shading system for this group.
     ShadingSystemImpl& shadingsys() const { return m_shadingsys; }
 
+    std::string hash_key() const { return m_hash_key; }
+    void hash_key(std::string hash_key) { m_hash_key = hash_key; }
+
     int optimized() const { return m_optimized; }
     void optimized(int opt) { m_optimized = opt; }
 
@@ -1828,6 +1837,8 @@ public:
 
     void name(ustring name) { m_name = name; }
     ustring name() const { return m_name; }
+
+    std::string optix_cache_key() const;
 
     std::string serialize() const;
 
@@ -1965,6 +1976,8 @@ public:
     }
 
 private:
+    std::string serialize_internal() const;
+
     // Put all the things that are read-only (after optimization) and
     // needed on every shade execution at the front of the struct, as much
     // together on one cache line as possible.
@@ -2015,6 +2028,8 @@ private:
     bool m_unknown_attributes_needed;
     atomic_ll m_executions { 0 };  ///< Number of times the group executed
     atomic_ll m_stat_total_shading_time_ticks { 0 };  // Shading time (ticks)
+
+    std::string m_hash_key;
 
     // PTX assembly for compiled ShaderGroup
     std::string m_llvm_ptx_compiled_version;

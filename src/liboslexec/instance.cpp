@@ -849,12 +849,30 @@ ShaderGroup::setup_interactive_arena(cspan<uint8_t> paramblock)
 
 
 std::string
+ShaderGroup::optix_cache_key() const
+{
+    const uint64_t ir_key = Strutil::strhash(serialize_internal());
+
+    std::string safegroup;
+    safegroup = Strutil::replace(name(), "/", "_", true);
+    safegroup = Strutil::replace(safegroup, ":", "_", true);
+    return fmtformat("cache-osl-{}-{}", safegroup, ir_key);
+}
+
+std::string
 ShaderGroup::serialize() const
+{
+    lock_guard lock(m_mutex);
+    return serialize_internal();
+}
+
+std::string
+ShaderGroup::serialize_internal() const
 {
     std::ostringstream out;
     out.imbue(std::locale::classic());  // force C locale
     out.precision(9);
-    lock_guard lock(m_mutex);
+
     for (int i = 0, nl = nlayers(); i < nl; ++i) {
         const ShaderInstance* inst = m_layers[i].get();
 

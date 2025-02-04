@@ -3774,6 +3774,7 @@ ShadingSystemImpl::optimize_group(ShaderGroup& group, ShadingContext* ctx,
         ctx           = get_context(thread_info);
         ctx_allocated = true;
     }
+
     if (!group.optimized()) {
         RuntimeOptimizer rop(*this, group, ctx);
         rop.run();
@@ -3823,34 +3824,50 @@ ShadingSystemImpl::optimize_group(ShaderGroup& group, ShadingContext* ctx,
     }
 
     if (need_jit) {
-        BackendLLVM lljitter(*this, group, ctx);
-        lljitter.run();
+        bool cached = false;
+        if (use_optix() && renderer()->optix_cache_enabled()) {
+            std::string cache_key = group.optix_cache_key();
+            group.hash_key(cache_key);
 
-        // NOTE: it is now possible to optimize and not JIT
-        // which would leave the cleanup to happen
-        // when the ShadingSystem is destroyed
-
-        // Only cleanup when are not batching or if
-        // the batch jit has already happened,
-        // as it requires the ops so we can't delete them yet!
-        if (((renderer()->batched(WidthOf<16>()) == nullptr)
-             && (renderer()->batched(WidthOf<8>()) == nullptr)
-             && (renderer()->batched(WidthOf<4>()) == nullptr))
-            || group.batch_jitted()) {
-            group_post_jit_cleanup(group);
+            std::string cache_value;
+            if (renderer()->optix_cache_get(cache_key, cache_value)) {
+                cached = true;
+                optix_cache_unwrap(cache_value,
+                                   group.m_llvm_ptx_compiled_version,
+                                   group.m_llvm_groupdata_size);
+            }
         }
 
-        group.m_jitted = true;
-        spin_lock stat_lock(m_stat_mutex);
-        m_stat_opt_locking_time += locking_time;
-        m_stat_optimization_time += timer();
-        m_stat_total_llvm_time += lljitter.m_stat_total_llvm_time;
-        m_stat_llvm_setup_time += lljitter.m_stat_llvm_setup_time;
-        m_stat_llvm_irgen_time += lljitter.m_stat_llvm_irgen_time;
-        m_stat_llvm_opt_time += lljitter.m_stat_llvm_opt_time;
-        m_stat_llvm_jit_time += lljitter.m_stat_llvm_jit_time;
-        m_stat_max_llvm_local_mem = std::max(m_stat_max_llvm_local_mem,
-                                             lljitter.m_llvm_local_mem);
+        if (!cached) {
+            BackendLLVM lljitter(*this, group, ctx);
+            lljitter.run();
+
+            // NOTE: it is now possible to optimize and not JIT
+            // which would leave the cleanup to happen
+            // when the ShadingSystem is destroyed
+
+            // Only cleanup when are not batching or if
+            // the batch jit has already happened,
+            // as it requires the ops so we can't delete them yet!
+            if (((renderer()->batched(WidthOf<16>()) == nullptr)
+                 && (renderer()->batched(WidthOf<8>()) == nullptr)
+                 && (renderer()->batched(WidthOf<4>()) == nullptr))
+                || group.batch_jitted()) {
+                group_post_jit_cleanup(group);
+            }
+
+            group.m_jitted = true;
+            spin_lock stat_lock(m_stat_mutex);
+            m_stat_opt_locking_time += locking_time;
+            m_stat_optimization_time += timer();
+            m_stat_total_llvm_time += lljitter.m_stat_total_llvm_time;
+            m_stat_llvm_setup_time += lljitter.m_stat_llvm_setup_time;
+            m_stat_llvm_irgen_time += lljitter.m_stat_llvm_irgen_time;
+            m_stat_llvm_opt_time += lljitter.m_stat_llvm_opt_time;
+            m_stat_llvm_jit_time += lljitter.m_stat_llvm_jit_time;
+            m_stat_max_llvm_local_mem = std::max(m_stat_max_llvm_local_mem,
+                                                 lljitter.m_llvm_local_mem);
+        }
     }
 
     if (ctx_allocated) {
