@@ -5,7 +5,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -657,6 +659,13 @@ std::string
 ShadingSystem::getstats(int level) const
 {
     return m_impl->getstats(level);
+}
+
+
+std::string
+ShadingSystem::groupdata_layout_report(ShaderGroup* group) const
+{
+    return m_impl->groupdata_layout_report(group);
 }
 
 
@@ -2311,7 +2320,93 @@ ShadingSystemImpl::getattribute(ShaderGroup* group, string_view name,
         return true;
     }
 
+    // GroupData per-param layout (populated after JIT compilation).
+    if (name == "num_groupdata_fields" && type == TypeInt) {
+        *(int*)val = group->num_groupdata_fields();
+        return true;
+    }
+    if (name == "groupdata_field_layer_names" && type.basetype == TypeDesc::PTR) {
+        const auto& v   = group->groupdata_layer_names();
+        *(ustring**)val = v.empty() ? nullptr : const_cast<ustring*>(&v[0]);
+        return true;
+    }
+    if (name == "groupdata_field_param_names" && type.basetype == TypeDesc::PTR) {
+        const auto& v   = group->groupdata_param_names();
+        *(ustring**)val = v.empty() ? nullptr : const_cast<ustring*>(&v[0]);
+        return true;
+    }
+    if (name == "groupdata_field_types" && type.basetype == TypeDesc::PTR) {
+        const auto& v    = group->groupdata_types();
+        *(TypeDesc**)val = v.empty() ? nullptr : const_cast<TypeDesc*>(&v[0]);
+        return true;
+    }
+    if (name == "groupdata_field_offsets" && type.basetype == TypeDesc::PTR) {
+        const auto& v = group->groupdata_offsets();
+        *(int**)val   = v.empty() ? nullptr : const_cast<int*>(&v[0]);
+        return true;
+    }
+    if (name == "groupdata_field_sizes" && type.basetype == TypeDesc::PTR) {
+        const auto& v = group->groupdata_sizes();
+        *(int**)val   = v.empty() ? nullptr : const_cast<int*>(&v[0]);
+        return true;
+    }
+
     return false;
+}
+
+
+
+std::string
+ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
+{
+    if (!group || !group->jitted())
+        return {};
+
+    int n = group->num_groupdata_fields();
+
+    std::ostringstream out;
+    out << "GroupData layout for \"" << group->name() << "\""
+        << "  (total " << group->llvm_groupdata_size() << " bytes, "
+        << n << " param fields):\n";
+
+    if (n == 0) {
+        out << "  (no param fields)\n";
+        return out.str();
+    }
+
+    const auto& layer_names = group->groupdata_layer_names();
+    const auto& param_names = group->groupdata_param_names();
+    const auto& types       = group->groupdata_types();
+    const auto& offsets     = group->groupdata_offsets();
+    const auto& sizes       = group->groupdata_sizes();
+    const auto& has_derivs  = group->groupdata_has_derivs();
+
+    // Column widths
+    int w_layer = 5, w_param = 5;
+    for (int i = 0; i < n; ++i) {
+        w_layer = std::max(w_layer, (int)layer_names[i].size());
+        w_param = std::max(w_param, (int)param_names[i].size());
+    }
+
+    out << "  " << std::left
+        << std::setw(w_layer + 2) << "layer"
+        << std::setw(w_param + 2) << "param"
+        << std::setw(14) << "type"
+        << std::setw(8)  << "offset"
+        << std::setw(8)  << "size"
+        << "derivs\n";
+    out << "  " << std::string(w_layer + w_param + 34, '-') << "\n";
+
+    for (int i = 0; i < n; ++i) {
+        out << "  " << std::left
+            << std::setw(w_layer + 2) << layer_names[i].string()
+            << std::setw(w_param + 2) << param_names[i].string()
+            << std::setw(14) << types[i]
+            << std::setw(8)  << offsets[i]
+            << std::setw(8)  << sizes[i]
+            << (has_derivs[i] ? "yes" : "no") << "\n";
+    }
+    return out.str();
 }
 
 
