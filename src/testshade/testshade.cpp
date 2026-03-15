@@ -80,7 +80,8 @@ static bool debugnan             = false;
 static bool debug_uninit         = false;
 static bool use_group_outputs    = false;
 static bool do_oslquery          = false;
-static bool print_groupdata      = false;
+static bool print_groupdata        = false;
+static bool print_groupdata_layout = false;
 static bool inbuffer             = false;
 static bool use_shade_image      = false;
 static bool userdata_isconnected = false;
@@ -828,6 +829,8 @@ getargs(int argc, const char* argv[])
       .help("Test OSLQuery at runtime");
     ap.arg("--print-groupdata", &print_groupdata)
         .help("Print groupdata size to stdout");
+    ap.arg("--print-groupdata-layout", &print_groupdata_layout)
+        .help("Print per-param GroupData layout table to stdout");
     ap.arg("--inbuffer", &inbuffer)
       .help("Compile osl source from and to jbuffer");
     ap.arg("--no-output-placement")
@@ -2323,6 +2326,9 @@ test_shade(int argc, const char* argv[])
                                  TypeDesc::INT, &groupdata_size);
 
         std::cout << "Groupdata size: " << groupdata_size << "\n";
+    }
+    if (print_groupdata_layout && !batched) {
+        std::cout << shadingsys->groupdata_layout_report(shadergroup.get());
     }
 
 

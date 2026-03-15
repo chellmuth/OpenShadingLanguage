@@ -516,6 +516,14 @@ public:
     ///   string pickle              Retrieves a serialized representation
     ///                                 of the shader group declaration.
     ///   int llvm_groupdata_size    Size of the GroupData struct.
+    ///   int num_groupdata_fields   Number of parameter slots in GroupData
+    ///                                (populated after JIT compilation).
+    ///   ptr groupdata_field_layer_names  ustring[] of layer names per slot.
+    ///   ptr groupdata_field_param_names  ustring[] of param names per slot.
+    ///   ptr groupdata_field_types        TypeDesc[] of base types per slot.
+    ///   ptr groupdata_field_offsets      int[] byte offsets per slot.
+    ///   ptr groupdata_field_sizes        int[] byte sizes per slot
+    ///                                      (includes deriv expansion).
     ///   ptr interactive_params     Pointer to the memory block containing
     ///                                 host-side interactive parameter values
     ///                                 for this shader group.
@@ -567,6 +575,18 @@ public:
     /// Load compiled shader (oso) from a memory buffer, overriding
     /// shader lookups in the shader search path
     bool LoadMemoryCompiledShader(string_view shadername, string_view buffer);
+
+    /// Return a human-readable report of the GroupData heap layout for
+    /// the given shader group.  Each row describes one parameter slot:
+    /// layer name, param name, type, byte offset, byte size, and whether
+    /// derivative slots are included.
+    ///
+    /// This is intended for debugging and for writing assertions in unit
+    /// tests (compare against the output of getattribute queries such as
+    /// "num_groupdata_fields").  The group must have been JIT compiled
+    /// (i.e., at least one shade must have been executed) before calling
+    /// this; otherwise the output will be empty.
+    std::string groupdata_layout_report(ShaderGroup* group) const;
 
     // The basic sequence for declaring a shader group looks like this:
     // ShadingSystem *ss = ...;

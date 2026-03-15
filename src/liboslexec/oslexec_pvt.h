@@ -601,6 +601,7 @@ public:
     void message(const std::string& message) const;
 
     std::string getstats(int level = 1) const;
+    std::string groupdata_layout_report(ShaderGroup* group) const;
 
     ErrorHandler& errhandler() const { return *m_err; }
 
@@ -1771,6 +1772,58 @@ public:
     size_t llvm_groupdata_size() const { return m_llvm_groupdata_size; }
     void llvm_groupdata_size(size_t size) { m_llvm_groupdata_size = size; }
 
+    /// Per-param GroupData layout info, populated during JIT compilation.
+    /// Parallel arrays: index i describes the i-th parameter slot.
+    const std::vector<ustring>& groupdata_layer_names() const
+    {
+        return m_groupdata_layer_names;
+    }
+    const std::vector<ustring>& groupdata_param_names() const
+    {
+        return m_groupdata_param_names;
+    }
+    const std::vector<TypeDesc>& groupdata_types() const
+    {
+        return m_groupdata_types;
+    }
+    const std::vector<int>& groupdata_offsets() const
+    {
+        return m_groupdata_offsets;
+    }
+    const std::vector<int>& groupdata_sizes() const
+    {
+        return m_groupdata_sizes;
+    }
+    const std::vector<char>& groupdata_has_derivs() const
+    {
+        return m_groupdata_has_derivs;
+    }
+    int num_groupdata_fields() const
+    {
+        return (int)m_groupdata_layer_names.size();
+    }
+
+    void groupdata_layout_clear()
+    {
+        m_groupdata_layer_names.clear();
+        m_groupdata_param_names.clear();
+        m_groupdata_types.clear();
+        m_groupdata_offsets.clear();
+        m_groupdata_sizes.clear();
+        m_groupdata_has_derivs.clear();
+    }
+    void groupdata_layout_push(ustring layer_name, ustring param_name,
+                               TypeDesc type, int offset, int size,
+                               bool has_derivs)
+    {
+        m_groupdata_layer_names.push_back(layer_name);
+        m_groupdata_param_names.push_back(param_name);
+        m_groupdata_types.push_back(type);
+        m_groupdata_offsets.push_back(offset);
+        m_groupdata_sizes.push_back(size);
+        m_groupdata_has_derivs.push_back((char)has_derivs);
+    }
+
     size_t llvm_groupdata_wide_size() const
     {
         return m_llvm_groupdata_wide_size;
@@ -2020,6 +2073,13 @@ private:
     size_t m_llvm_groupdata_size = 0;  ///< Heap size needed for its groupdata
     size_t m_llvm_groupdata_wide_size
         = 0;                     ///< Heap size needed for its wide groupdata
+    // Per-param GroupData layout (parallel arrays, populated during JIT).
+    std::vector<ustring> m_groupdata_layer_names;
+    std::vector<ustring> m_groupdata_param_names;
+    std::vector<TypeDesc> m_groupdata_types;
+    std::vector<int>     m_groupdata_offsets;
+    std::vector<int>     m_groupdata_sizes;
+    std::vector<char>    m_groupdata_has_derivs;
     int m_id;                    ///< Unique ID for the group
     int m_num_entry_layers = 0;  ///< Number of marked entry layers
     RunLLVMGroupFunc m_llvm_compiled_version = nullptr;

@@ -355,6 +355,7 @@ BackendLLVM::llvm_type_groupdata()
     // connected or interpolated, and output params.  Also mark those
     // symbols with their offset within the group struct.
     m_param_order_map.clear();
+    group().groupdata_layout_clear();
     for (int layer = 0; layer < group().nlayers(); ++layer) {
         ShaderInstance* inst = group()[layer];
         if (inst->unused())
@@ -398,6 +399,11 @@ BackendLLVM::llvm_type_groupdata()
                       sym.interactive() ? " (interactive)" : "");
             sym.dataoffset((int)offset);
             // TODO(arenas): sym.set_dataoffset(SymArena::Heap, offset);
+            group().groupdata_layout_push(inst->layername(), sym.name(),
+                                          sym.typespec().simpletype(),
+                                          (int)offset,
+                                          derivSize * (int)sym.size(),
+                                          sym.has_derivs());
             offset += derivSize * sym.size();
             m_param_order_map[&sym] = order;
             ++order;
