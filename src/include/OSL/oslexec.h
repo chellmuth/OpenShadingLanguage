@@ -588,6 +588,12 @@ public:
     /// this; otherwise the output will be empty.
     std::string groupdata_layout_report(ShaderGroup* group) const;
 
+    /// Return a Graphviz DOT description of the shader group's layer
+    /// connection graph.  Callable at any stage (before or after JIT).
+    /// After JIT, unused layers are shown in gray.  Pipe the output to
+    /// `dot -Tsvg -o group.svg` to render it.
+    std::string group_dot_graph(ShaderGroup* group) const;
+
     // The basic sequence for declaring a shader group looks like this:
     // ShadingSystem *ss = ...;
     // ShaderGroupRef group = ss->ShaderGroupBegin (groupname);
