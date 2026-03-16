@@ -602,6 +602,7 @@ public:
 
     std::string getstats(int level = 1) const;
     std::string groupdata_layout_report(ShaderGroup* group) const;
+    std::string group_dot_graph(ShaderGroup* group) const;
 
     ErrorHandler& errhandler() const { return *m_err; }
 

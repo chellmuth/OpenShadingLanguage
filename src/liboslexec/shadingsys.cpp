@@ -670,6 +670,14 @@ ShadingSystem::groupdata_layout_report(ShaderGroup* group) const
 
 
 
+std::string
+ShadingSystem::group_dot_graph(ShaderGroup* group) const
+{
+    return m_impl->group_dot_graph(group);
+}
+
+
+
 void
 ShadingSystem::register_closure(string_view name, int id,
                                 const ClosureParam* params,
@@ -2409,6 +2417,87 @@ ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
             << std::setw(8)  << sizes[i]
             << (has_derivs[i] ? "yes" : "no") << "\n";
     }
+    return out.str();
+}
+
+
+
+std::string
+ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
+{
+    if (!group)
+        return {};
+
+    // Escape characters that are unsafe inside a DOT quoted label.
+    auto dot_escape = [](string_view s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            if (c == '"')
+                out += "\\\"";
+            else if (c == '\\')
+                out += "\\\\";
+            else
+                out += c;
+        }
+        return out;
+    };
+
+    bool is_jitted = group->jitted();
+
+    std::ostringstream out;
+    out << "digraph \"" << dot_escape(group->name()) << "\" {\n";
+    out << "    rankdir=LR;\n";
+    out << "    node [shape=box style=filled fontname=Helvetica fontsize=10];\n";
+    out << "    edge [fontname=Helvetica fontsize=9];\n\n";
+
+    // One node per layer.
+    for (int i = 0; i < group->nlayers(); ++i) {
+        ShaderInstance* inst = (*group)[i];
+        std::string label    = fmtformat("{}\\n({})",
+                                         dot_escape(inst->layername()),
+                                         dot_escape(inst->shadername()));
+
+        const char* fill;
+        if (is_jitted && (inst->unused() || inst->empty_instance()))
+            fill = "#cccccc";  // gray  — dead after optimization
+        else if (inst->last_layer())
+            fill = "#aaddaa";  // green — implicit group entry (last layer)
+        else if (inst->entry_layer())
+            fill = "#aaddaa";  // green — explicit entry layer
+        else
+            fill = "#ddeeff";  // blue  — ordinary lazy layer
+
+        std::string peripheries = inst->last_layer() ? " peripheries=2" : "";
+
+        out << "    layer_" << i << " [label=\"" << label << "\""
+            << " fillcolor=\"" << fill << "\"" << peripheries << "];\n";
+    }
+    out << "\n";
+
+    // One directed edge per connection.
+    for (int i = 0; i < group->nlayers(); ++i) {
+        ShaderInstance* dst_inst = (*group)[i];
+        for (int c = 0; c < dst_inst->nconnections(); ++c) {
+            const Connection& conn  = dst_inst->connection(c);
+            ShaderInstance* src_inst = (*group)[conn.srclayer];
+            const Symbol* src_sym   = src_inst->symbol(conn.src.param);
+            const Symbol* dst_sym   = dst_inst->symbol(conn.dst.param);
+
+            std::string src_name = src_sym ? src_sym->name().string() : "?";
+            std::string dst_name = dst_sym ? dst_sym->name().string() : "?";
+            if (conn.src.channel >= 0)
+                src_name += fmtformat("[{}]", conn.src.channel);
+            if (conn.dst.channel >= 0)
+                dst_name += fmtformat("[{}]", conn.dst.channel);
+
+            out << "    layer_" << conn.srclayer << " -> layer_" << i
+                << " [label=\"" << dot_escape(src_name) << " \xe2\x86\x92 "
+                << dot_escape(dst_name) << "\"];\n";
+        }
+    }
+
+    out << "}\n";
     return out.str();
 }
 
