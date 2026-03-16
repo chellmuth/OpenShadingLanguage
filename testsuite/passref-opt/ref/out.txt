@@ -1,0 +1,17 @@
+Compiled downstream.osl -> downstream.oso
+Compiled upstream.osl -> upstream.oso
+Connect upstream_layer.out_val to downstream_layer.in_val
+in_val = 1
+
+Groupdata size: 16
+Connect upstream_layer.out_val to downstream_layer.in_val
+in_val = 1
+
+GroupData layout for "unnamed_group_1"  (total 16 bytes, 1 param fields):
+  layer             param  type          offset  size    derivs
+  -------------------------------------------------------
+  downstream_layer  Cout   color         4       12      no
+Connect upstream_layer.out_val to downstream_layer.in_val
+in_val = 1
+
+Groupdata size: 20

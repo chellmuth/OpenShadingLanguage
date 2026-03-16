@@ -369,6 +369,12 @@ BackendLLVM::llvm_type_groupdata()
             if (can_treat_param_as_local(sym))
                 continue;
 
+            // Passref input: connected scalar float input params are removed
+            // from GroupData -- they will live in an alloca in the downstream
+            // layer's frame, passed to the upstream layer as a pointer arg.
+            if (is_passref_input(sym))
+                continue;
+
             const int arraylen  = std::max(1, sym.typespec().arraylength());
             const int derivSize = (sym.has_derivs() ? 3 : 1);
             ts.make_array(arraylen * derivSize);
@@ -1558,17 +1564,43 @@ BackendLLVM::build_llvm_instance(bool groupentry)
     std::string unique_layer_name = layer_function_name(group(), *inst());
 
     bool is_entry_layer = group().is_entry_layer(layer());
+
+    // Reset passref maps for this layer.
+    m_passref_input_allocas.clear();
+    m_passref_output_ptrs.clear();
+    m_passref_call_table.clear();
+
+    // Collect passref output params for this layer (extra pointer args).
+    // These are can_treat_param_as_local outputs that a single downstream
+    // layer reads via a passref input connection.
+    std::vector<const Symbol*> passref_out_syms;
+    {
+        FOREACH_PARAM(const Symbol& s, inst())
+        {
+            if (is_passref_output(s))
+                passref_out_syms.push_back(&s);
+        }
+    }
+
+    // Build the function param type list: 6 standard args + one float* per
+    // passref output.
+    std::vector<llvm::Type*> layer_param_types = {
+        llvm_type_sg_ptr(),
+        llvm_type_groupdata_ptr(),
+        ll.type_void_ptr(),  // userdata_base_ptr
+        ll.type_void_ptr(),  // output_base_ptr
+        ll.type_int(),
+        ll.type_void_ptr(),  // interactive_params
+    };
+    for (const Symbol* ps : passref_out_syms)
+        layer_param_types.push_back(
+            ll.type_ptr(llvm_type(ps->typespec().elementtype())));
+
     ll.current_function(ll.make_function(
         unique_layer_name,
         !is_entry_layer,  // fastcall for non-entry layer functions
         ll.type_void(),   // return type
-        {
-            llvm_type_sg_ptr(), llvm_type_groupdata_ptr(),
-            ll.type_void_ptr(),  // userdata_base_ptr
-            ll.type_void_ptr(),  // output_base_ptr
-            ll.type_int(),
-            ll.type_void_ptr(),  // FIXME: interactive_params
-        }));
+        layer_param_types));
 
     if (ll.debug_is_enabled()) {
         const Opcode& mainbegin(inst()->op(inst()->maincodebegin()));
@@ -1589,6 +1621,13 @@ BackendLLVM::build_llvm_instance(bool groupentry)
     m_llvm_shadeindex->setName("shadeindex");
     m_llvm_interactive_params_ptr = ll.current_function_arg(5);  //arg_it++;
     m_llvm_interactive_params_ptr->setName("interactive_params_ptr");
+
+    // Extract passref output pointer args (args 6, 7, ...) and populate map.
+    for (int i = 0, n = (int)passref_out_syms.size(); i < n; ++i) {
+        llvm::Value* arg = ll.current_function_arg(6 + i);
+        arg->setName(llnamefmt("passref_out_{}", passref_out_syms[i]->name()));
+        m_passref_output_ptrs[passref_out_syms[i]] = arg;
+    }
 
     // New function, reset temp matrix pointer
     m_llvm_temp_texture_options_ptr = nullptr;
@@ -1655,10 +1694,26 @@ BackendLLVM::build_llvm_instance(bool groupentry)
         // Skip structure placeholders
         if (s.typespec().is_structure())
             continue;
-        // Allocate space for locals, temps, aggregate constants, and some output params
+        // Allocate space for locals, temps, aggregate constants, and some output params.
+        // Passref outputs skip getOrAllocateLLVMSymbol; they use a pointer function arg.
         if (s.symtype() == SymTypeLocal || s.symtype() == SymTypeTemp
-            || s.symtype() == SymTypeConst || can_treat_param_as_local(s))
+            || s.symtype() == SymTypeConst
+            || (can_treat_param_as_local(s) && !is_passref_output(s)))
             getOrAllocateLLVMSymbol(s);
+
+        // Passref inputs: allocate an alloca in this layer's frame and register
+        // in named_values so getLLVMSymbolBase can find it.
+        if (s.symtype() == SymTypeParam) {
+            int up_layer = -1, up_param = -1;
+            if (is_passref_input(s, &up_layer, &up_param)) {
+                llvm::Value* alloca_val = llvm_alloca(
+                    s.typespec(), s.has_derivs(),
+                    llnamefmt("passref_in_{}", s.name()));
+                m_passref_input_allocas[&s]                    = alloca_val;
+                named_values()[s.dealias()->mangled()]          = alloca_val;
+                m_passref_call_table[{ up_layer, up_param }]   = alloca_val;
+            }
+        }
         // Set initial value for constants, closures, and strings that are
         // not parameters.
         if (s.symtype() != SymTypeParam && s.symtype() != SymTypeOutputParam
@@ -1798,6 +1853,12 @@ BackendLLVM::build_llvm_instance(bool groupentry)
                 // llvm_run_connected_layers tracks layers that have been run,
                 // so no need to do it here as well
                 llvm_run_connected_layers(*srcsym, con.src.param);
+
+                // For passref pairs, the upstream layer already wrote directly
+                // into the downstream layer's alloca via the pointer arg.
+                // No copy is needed.
+                if (m_passref_output_ptrs.count(srcsym))
+                    continue;
 
                 // FIXME -- I'm not sure I understand this.  Isn't this
                 // unnecessary if we wrote to the parameter ourself?

@@ -242,6 +242,20 @@ BackendLLVM::getLLVMSymbolBase(const Symbol& sym)
                              llvm_ptr_type(sym.typespec().elementtype()));
     }
 
+    // Passref input: the downstream layer allocates an alloca for this param.
+    {
+        auto it_in = m_passref_input_allocas.find(&sym);
+        if (it_in != m_passref_input_allocas.end())
+            return it_in->second;
+    }
+
+    // Passref output: this layer receives a pointer arg from the downstream layer.
+    {
+        auto it_out = m_passref_output_ptrs.find(&sym);
+        if (it_out != m_passref_output_ptrs.end())
+            return it_out->second;
+    }
+
     if (sym.symtype() == SymTypeParam
         || (sym.symtype() == SymTypeOutputParam
             && !can_treat_param_as_local(sym))) {
@@ -286,6 +300,141 @@ BackendLLVM::can_treat_param_as_local(const Symbol& sym)
     // onto the stack.
     return sym.symtype() == SymTypeOutputParam && !sym.renderer_output()
            && !sym.typespec().is_closure_based() && !sym.connected();
+}
+
+
+
+bool
+BackendLLVM::is_passref_input(const Symbol& sym, int* upstream_layer_out,
+                               int* upstream_param_out) const
+{
+    if (!shadingsys().m_opt_passref || !shadingsys().m_opt_groupdata)
+        return false;
+
+    // Must be a connected scalar float input param without derivatives.
+    if (sym.symtype() != SymTypeParam || !sym.connected())
+        return false;
+    if (!sym.typespec().is_float_based()
+        || sym.typespec().aggregate() != TypeDesc::SCALAR)
+        return false;
+    if (sym.has_derivs())
+        return false;
+
+    // Find the symbol index within the layer that owns sym.
+    // Use sym.layer() to be safe even when called before set_inst().
+    ShaderInstance* sym_inst = group()[sym.layer()];
+    int sym_idx              = -1;
+    for (int i = 0, n = (int)sym_inst->symbols().size(); i < n; ++i) {
+        if (sym_inst->symbol(i) == &sym) {
+            sym_idx = i;
+            break;
+        }
+    }
+    if (sym_idx < 0)
+        return false;
+
+    // Find the unique complete connection to this param.
+    const Connection* found_con = nullptr;
+    for (int c = 0, Nc = sym_inst->nconnections(); c < Nc; ++c) {
+        const Connection& con = sym_inst->connection(c);
+        if (con.dst.param == sym_idx) {
+            if (con.src.channel != -1 || con.dst.channel != -1)
+                return false;  // partial/channel connection not supported
+            if (found_con)
+                return false;  // multiple connections to same param
+            found_con = &con;
+        }
+    }
+    if (!found_con)
+        return false;
+
+    int up_layer = found_con->srclayer;
+    int up_param = found_con->src.param;
+    ShaderInstance* up_inst  = group()[up_layer];
+    const Symbol& up_sym     = *up_inst->symbol(up_param);
+
+    // Upstream output must satisfy can_treat_param_as_local criteria
+    // (stack local, not in GroupData, not itself connected).
+    if (up_sym.symtype() != SymTypeOutputParam || up_sym.renderer_output()
+        || up_sym.typespec().is_closure_based() || up_sym.connected())
+        return false;
+
+    // Upstream layer must run lazily.  Non-lazy (eager) layers are always
+    // called unconditionally by the entry layer with the standard 6-arg ABI.
+    // Giving them a passref output signature (7+ args) would cause a crash.
+    // Also exclude explicit entry layers, which are called from execute_layer
+    // with the standard 6-arg ABI.
+    if (!up_inst->run_lazily() || up_inst->entry_layer())
+        return false;
+
+    // Upstream output must have exactly ONE active downstream connection
+    // (ignoring unused/emptied layers which will never be executed).
+    int down_count = 0;
+    for (int dl = up_layer + 1; dl < group().nlayers(); ++dl) {
+        ShaderInstance* dl_inst = group()[dl];
+        if (dl_inst->unused() || dl_inst->empty_instance())
+            continue;
+        for (int c = 0, Nc = dl_inst->nconnections(); c < Nc; ++c) {
+            const Connection& con = dl_inst->connection(c);
+            if (con.srclayer == up_layer && con.src.param == up_param) {
+                ++down_count;
+                if (down_count > 1)
+                    return false;
+            }
+        }
+    }
+    if (down_count != 1)
+        return false;
+
+    if (upstream_layer_out)
+        *upstream_layer_out = up_layer;
+    if (upstream_param_out)
+        *upstream_param_out = up_param;
+    return true;
+}
+
+
+
+bool
+BackendLLVM::is_passref_output(const Symbol& sym)
+{
+    if (!shadingsys().m_opt_passref)
+        return false;
+
+    // Must be a can_treat_param_as_local output param in the current layer.
+    if (!can_treat_param_as_local(sym))
+        return false;
+
+    // Find symbol index in the current instance.
+    int sym_idx = -1;
+    for (int i = 0, n = (int)inst()->symbols().size(); i < n; ++i) {
+        if (inst()->symbol(i) == &sym) {
+            sym_idx = i;
+            break;
+        }
+    }
+    if (sym_idx < 0)
+        return false;
+
+    int cur_layer = layer();
+    for (int dl = cur_layer + 1; dl < group().nlayers(); ++dl) {
+        ShaderInstance* dl_inst = group()[dl];
+        // Skip unused/emptied layers: their symbol tables may have been
+        // cleared by the optimizer, making symbol() dereferences invalid.
+        if (dl_inst->unused() || dl_inst->empty_instance())
+            continue;
+        for (int c = 0, Nc = dl_inst->nconnections(); c < Nc; ++c) {
+            const Connection& con = dl_inst->connection(c);
+            if (con.srclayer == cur_layer && con.src.param == sym_idx) {
+                // Use the full is_passref_input check, which enforces the
+                // single-consumer constraint and all other criteria.
+                const Symbol& dl_sym = *dl_inst->symbol(con.dst.param);
+                if (is_passref_input(dl_sym))
+                    return true;
+            }
+        }
+    }
+    return false;
 }
 
 llvm::Value*

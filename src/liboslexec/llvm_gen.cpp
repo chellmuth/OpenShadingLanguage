@@ -142,11 +142,31 @@ BackendLLVM::llvm_call_layer(int layer, bool unconditional)
     // if it's run unconditionally.
     // The code in the parent layer itself will set its 'executed' flag.
 
-    llvm::Value* args[]
+    std::vector<llvm::Value*> args
         = { sg_ptr(),          groupdata_ptr(), userdata_base_ptr(),
             output_base_ptr(), shadeindex(),    m_llvm_interactive_params_ptr };
 
-    ShaderInstance* parent       = group()[layer];
+    // Append passref output pointer args for the callee.
+    // When this layer has allocated allocas for passref inputs that are
+    // connected from the callee, pass those allocas as extra pointer args.
+    ShaderInstance* parent = group()[layer];
+    FOREACH_PARAM(const Symbol& s, parent)
+    {
+        if (s.symtype() != SymTypeOutputParam)
+            continue;
+        // Find the symbol index in the parent instance.
+        int sym_idx = -1;
+        for (int i = 0, n = (int)parent->symbols().size(); i < n; ++i) {
+            if (parent->symbol(i) == &s) {
+                sym_idx = i;
+                break;
+            }
+        }
+        auto it = m_passref_call_table.find({ layer, sym_idx });
+        if (it != m_passref_call_table.end())
+            args.push_back(it->second);
+    }
+
     llvm::Value* trueval         = ll.constant_bool(true);
     llvm::Value* layerfield      = layer_run_ref(layer_remap(layer));
     llvm::BasicBlock *then_block = NULL, *after_block = NULL;
