@@ -1,0 +1,9 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+shader downstream(float in_val = 0, output color Cout = color(0, 0, 0))
+{
+    printf("in_val = %g\n", in_val);
+    Cout = color(in_val, in_val * 0.5, 0);
+}

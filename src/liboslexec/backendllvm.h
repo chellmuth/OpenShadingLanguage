@@ -5,6 +5,7 @@
 #pragma once
 
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 #include "oslexec_pvt.h"
@@ -216,6 +217,19 @@ public:
     /// Checks if a symbol represents a parameter that can be stored on the
     /// stack instead of in GroupData
     bool can_treat_param_as_local(const Symbol& sym);
+
+    /// Returns true if sym (a connected input param in the current layer) is a
+    /// passref candidate: a float scalar input connected from a single upstream
+    /// output that is itself can_treat_param_as_local, with exactly one
+    /// downstream consumer.  When true, fills *upstream_layer_out and
+    /// *upstream_param_out with the source layer/param indices.
+    bool is_passref_input(const Symbol& sym, int* upstream_layer_out = nullptr,
+                          int* upstream_param_out = nullptr) const;
+
+    /// Returns true if sym (an output param of the current layer) is a passref
+    /// output that will be written through a pointer arg rather than via
+    /// GroupData.
+    bool is_passref_output(const Symbol& sym);
 
     /// Given the OSL symbol, return the llvm::Value* corresponding to the
     /// address of the start of that symbol (first element, first component,
@@ -596,6 +610,14 @@ private:
 
     bool m_use_optix;  ///< Compile for OptiX?
     bool m_use_rs_bitcode;  /// To use free function versions of Renderer Service functions.
+
+    // Passref optimization data (reset per-layer in build_llvm_instance).
+    // Maps a connected input param Symbol* -> alloca Value* in this layer's frame.
+    std::unordered_map<const Symbol*, llvm::Value*> m_passref_input_allocas;
+    // Maps a passref output param Symbol* -> pointer function-arg Value*.
+    std::unordered_map<const Symbol*, llvm::Value*> m_passref_output_ptrs;
+    // Maps (upstream_layer_idx, upstream_param_idx) -> alloca to pass on call.
+    std::map<std::pair<int, int>, llvm::Value*> m_passref_call_table;
 
     friend class ShadingSystemImpl;
 };

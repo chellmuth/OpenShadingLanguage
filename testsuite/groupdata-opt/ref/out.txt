@@ -8,7 +8,7 @@ Groupdata size: 12
 Connect input_layer.Val_Out to main_layer.Val_In
 Val_in = 0.860313
 
-Groupdata size: 8
+Groupdata size: 4
 Connect input_layer.Val_Out to test_layer.Val_Out
 Connect test_layer.Val_Out to main_layer.Val_In
 side-effect
