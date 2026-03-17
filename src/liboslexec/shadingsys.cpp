@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -2447,6 +2448,73 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
     };
 
     bool is_jitted = group->jitted();
+    int nlayers    = group->nlayers();
+
+    // Determine which layers have passref outputs — i.e. all their downstream
+    // connections go to exactly one consumer layer, and at least one of those
+    // connections is a complete connection from a can_treat_param_as_local
+    // output to a float-scalar input without derivs.  Mirrors the logic in
+    // BackendLLVM::is_passref_input / is_passref_output.
+    std::vector<bool> layer_has_passref_out(nlayers, false);
+    if (m_opt_passref && m_opt_groupdata) {
+        for (int li = 0; li < nlayers; ++li) {
+            ShaderInstance* inst = (*group)[li];
+            if (!inst || inst->unused() || inst->empty_instance())
+                continue;
+            if (!inst->run_lazily() || inst->entry_layer())
+                continue;
+
+            // Sole-consumer check: all connections from this layer must go to
+            // exactly one downstream layer.
+            int sole = -1;
+            for (int dl = li + 1; dl < nlayers; ++dl) {
+                ShaderInstance* dl_inst = (*group)[dl];
+                if (!dl_inst || dl_inst->unused() || dl_inst->empty_instance())
+                    continue;
+                for (int c = 0; c < dl_inst->nconnections(); ++c) {
+                    if (dl_inst->connection(c).srclayer == li) {
+                        if (sole == -1)
+                            sole = dl;
+                        else if (sole != dl)
+                            goto next_layer;
+                    }
+                }
+            }
+            if (sole < 0)
+                goto next_layer;
+
+            // At least one eligible passref connection must exist.
+            {
+                ShaderInstance* dl_inst = (*group)[sole];
+                for (int c = 0; c < dl_inst->nconnections(); ++c) {
+                    const Connection& con = dl_inst->connection(c);
+                    if (con.srclayer != li)
+                        continue;
+                    if (con.src.channel != -1 || con.dst.channel != -1)
+                        continue;
+                    const Symbol* src_sym = inst->symbol(con.src.param);
+                    const Symbol* dst_sym = dl_inst->symbol(con.dst.param);
+                    if (!src_sym || !dst_sym)
+                        continue;
+                    // Upstream output must be can_treat_param_as_local.
+                    if (src_sym->symtype() != SymTypeOutputParam
+                        || src_sym->renderer_output()
+                        || src_sym->typespec().is_closure_based()
+                        || src_sym->connected())
+                        continue;
+                    // Downstream input must be float scalar without derivs.
+                    if (dst_sym->symtype() != SymTypeParam
+                        || !dst_sym->typespec().is_float_based()
+                        || dst_sym->typespec().aggregate() != TypeDesc::SCALAR
+                        || dst_sym->has_derivs())
+                        continue;
+                    layer_has_passref_out[li] = true;
+                    break;
+                }
+            }
+        next_layer:;
+        }
+    }
 
     std::ostringstream out;
     out << "digraph \"" << dot_escape(group->name()) << "\" {\n";
@@ -2455,7 +2523,7 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
     out << "    edge [fontname=Helvetica fontsize=9];\n\n";
 
     // One node per layer.
-    for (int i = 0; i < group->nlayers(); ++i) {
+    for (int i = 0; i < nlayers; ++i) {
         ShaderInstance* inst = (*group)[i];
         std::string label    = fmtformat("{}\\n({})",
                                          dot_escape(inst->layername()),
@@ -2463,13 +2531,15 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
 
         const char* fill;
         if (is_jitted && (inst->unused() || inst->empty_instance()))
-            fill = "#cccccc";  // gray  — dead after optimization
+            fill = "#cccccc";  // gray   — dead after optimization
+        else if (layer_has_passref_out[i])
+            fill = "#ffddaa";  // orange — passref upstream (extra ptr args)
         else if (inst->last_layer())
-            fill = "#aaddaa";  // green — implicit group entry (last layer)
+            fill = "#aaddaa";  // green  — implicit group entry (last layer)
         else if (inst->entry_layer())
-            fill = "#aaddaa";  // green — explicit entry layer
+            fill = "#aaddaa";  // green  — explicit entry layer
         else
-            fill = "#ddeeff";  // blue  — ordinary lazy layer
+            fill = "#ddeeff";  // blue   — ordinary lazy layer
 
         std::string peripheries = inst->last_layer() ? " peripheries=2" : "";
 
@@ -2478,25 +2548,17 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
     }
     out << "\n";
 
-    // One directed edge per connection.
-    for (int i = 0; i < group->nlayers(); ++i) {
+    // One directed edge per (src_layer, dst_layer) pair — multiple connections
+    // between the same pair are merged into a single unlabelled arrow.
+    std::set<std::pair<int, int>> seen_edges;
+    for (int i = 0; i < nlayers; ++i) {
         ShaderInstance* dst_inst = (*group)[i];
         for (int c = 0; c < dst_inst->nconnections(); ++c) {
-            const Connection& conn  = dst_inst->connection(c);
-            ShaderInstance* src_inst = (*group)[conn.srclayer];
-            const Symbol* src_sym   = src_inst->symbol(conn.src.param);
-            const Symbol* dst_sym   = dst_inst->symbol(conn.dst.param);
-
-            std::string src_name = src_sym ? src_sym->name().string() : "?";
-            std::string dst_name = dst_sym ? dst_sym->name().string() : "?";
-            if (conn.src.channel >= 0)
-                src_name += fmtformat("[{}]", conn.src.channel);
-            if (conn.dst.channel >= 0)
-                dst_name += fmtformat("[{}]", conn.dst.channel);
-
-            out << "    layer_" << conn.srclayer << " -> layer_" << i
-                << " [label=\"" << dot_escape(src_name) << " \xe2\x86\x92 "
-                << dot_escape(dst_name) << "\"];\n";
+            const Connection& conn = dst_inst->connection(c);
+            auto key               = std::make_pair(conn.srclayer, i);
+            if (seen_edges.insert(key).second)
+                out << "    layer_" << conn.srclayer << " -> layer_" << i
+                    << ";\n";
         }
     }
 
