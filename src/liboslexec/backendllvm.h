@@ -219,7 +219,7 @@ public:
     bool can_treat_param_as_local(const Symbol& sym);
 
     /// Returns true if sym (a connected input param in the current layer) is a
-    /// passref candidate: a float scalar input connected from a single upstream
+    /// passref candidate: a non-closure input connected from a single upstream
     /// output that is itself can_treat_param_as_local, with exactly one
     /// downstream consumer.  When true, fills *upstream_layer_out and
     /// *upstream_param_out with the source layer/param indices.

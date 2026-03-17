@@ -2455,7 +2455,7 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
     // is_passref_output: a layer qualifies when all its downstream connections
     // go to exactly one consumer layer and at least one of those connections
     // is a complete connection from a can_treat_param_as_local output to a
-    // float-scalar input without derivs.
+    // non-closure input.
     std::vector<int> layer_passref_bytes(nlayers, 0);  // bytes saved per layer
     if (m_opt_passref && m_opt_groupdata) {
         for (int li = 0; li < nlayers; ++li) {
@@ -2503,16 +2503,14 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
                         || src_sym->typespec().is_closure_based()
                         || src_sym->connected())
                         continue;
-                    // Downstream input must be float scalar without derivs.
+                    // Downstream input must be a non-closure param.
                     if (dst_sym->symtype() != SymTypeParam
-                        || !dst_sym->typespec().is_float_based()
-                        || dst_sym->typespec().aggregate() != TypeDesc::SCALAR
-                        || dst_sym->has_derivs())
+                        || dst_sym->typespec().is_closure_based())
                         continue;
-                    // Each removed float GroupData slot saves 4 bytes.
-                    layer_passref_bytes[li] += (int)dst_sym->typespec()
-                                                   .simpletype()
-                                                   .size();
+                    // Bytes saved: size of the type (×3 if it has derivs).
+                    int sz = (int)dst_sym->typespec().simpletype().size();
+                    int nd = dst_sym->has_derivs() ? 3 : 1;
+                    layer_passref_bytes[li] += sz * nd;
                 }
             }
         next_layer:;

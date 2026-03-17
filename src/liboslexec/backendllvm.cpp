@@ -311,13 +311,10 @@ BackendLLVM::is_passref_input(const Symbol& sym, int* upstream_layer_out,
     if (!shadingsys().m_opt_passref || !shadingsys().m_opt_groupdata)
         return false;
 
-    // Must be a connected scalar float input param without derivatives.
+    // Must be a connected non-closure input param.
     if (sym.symtype() != SymTypeParam || !sym.connected())
         return false;
-    if (!sym.typespec().is_float_based()
-        || sym.typespec().aggregate() != TypeDesc::SCALAR)
-        return false;
-    if (sym.has_derivs())
+    if (sym.typespec().is_closure_based())
         return false;
 
     // Find the symbol index within the layer that owns sym.
@@ -359,13 +356,42 @@ BackendLLVM::is_passref_input(const Symbol& sym, int* upstream_layer_out,
         || up_sym.typespec().is_closure_based() || up_sym.connected())
         return false;
 
+    // Types must match exactly so the pointer passed as a function arg has
+    // the same layout as the alloca allocated in the downstream layer.
+    // Cross-type coercions (e.g. float→color, channel extraction) are
+    // handled by the normal connection-transfer path, not by passref.
+    if (up_sym.typespec() != sym.typespec())
+        return false;
+
     // Upstream layer must run lazily.  Non-lazy (eager) layers are always
     // called unconditionally by the entry layer with the standard 6-arg ABI.
     // Giving them a passref output signature (7+ args) would cause a crash.
     // Also exclude explicit entry layers, which are called from execute_layer
     // with the standard 6-arg ABI.
-    if (!up_inst->run_lazily() || up_inst->entry_layer())
-        return false;
+    //
+    // Note: run_lazily() depends on has_trace_op(), which is set DURING JIT
+    // code generation for the upstream layer (via llvm_gen.cpp::LLVM_trace).
+    // If we call run_lazily() while building the upstream layer itself,
+    // has_trace_op() is still false, giving a stale answer.  To handle
+    // lazytrace=0 correctly, pre-scan the upstream ops for any trace call.
+    {
+        static const ustring k_trace("trace");
+        bool upstream_has_trace = up_inst->has_trace_op();
+        if (!upstream_has_trace && !shadingsys().lazy_trace()) {
+            for (int oi = 0, Nops = (int)up_inst->ops().size(); oi < Nops;
+                 ++oi) {
+                if (up_inst->ops()[oi].opname() == k_trace) {
+                    upstream_has_trace = true;
+                    break;
+                }
+            }
+        }
+        bool will_run_lazily = up_inst->run_lazily();
+        if (!shadingsys().lazy_trace() && upstream_has_trace)
+            will_run_lazily = false;
+        if (!will_run_lazily || up_inst->entry_layer())
+            return false;
+    }
 
     // The upstream layer must be called by exactly ONE downstream layer.
     // Passref changes the layer's function signature (extra pointer args),

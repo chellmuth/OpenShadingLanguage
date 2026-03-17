@@ -1712,6 +1712,11 @@ BackendLLVM::build_llvm_instance(bool groupentry)
                 m_passref_input_allocas[&s]                    = alloca_val;
                 named_values()[s.dealias()->mangled()]          = alloca_val;
                 m_passref_call_table[{ up_layer, up_param }]   = alloca_val;
+                // The upstream writes the value through the passref pointer
+                // but may not compute derivatives.  Pre-zero the deriv slots
+                // so they are defined (conservative zero-deriv assumption).
+                if (s.has_derivs())
+                    llvm_zero_derivs(s);
             }
         }
         // Set initial value for constants, closures, and strings that are
@@ -1856,8 +1861,11 @@ BackendLLVM::build_llvm_instance(bool groupentry)
 
                 // For passref pairs, the upstream layer already wrote directly
                 // into the downstream layer's alloca via the pointer arg.
-                // No copy is needed.
-                if (m_passref_output_ptrs.count(srcsym))
+                // No copy is needed.  Only skip the full-connection case where
+                // dstsym is an actual passref input — partial/channel
+                // connections from the same srcsym still need a normal copy.
+                if (m_passref_output_ptrs.count(srcsym)
+                    && is_passref_input(*dstsym))
                     continue;
 
                 // FIXME -- I'm not sure I understand this.  Isn't this
