@@ -367,24 +367,33 @@ BackendLLVM::is_passref_input(const Symbol& sym, int* upstream_layer_out,
     if (!up_inst->run_lazily() || up_inst->entry_layer())
         return false;
 
-    // Upstream output must have exactly ONE active downstream connection
-    // (ignoring unused/emptied layers which will never be executed).
-    int down_count = 0;
+    // The upstream layer must be called by exactly ONE downstream layer.
+    // Passref changes the layer's function signature (extra pointer args),
+    // and every caller must pass matching args.  More fundamentally, if two
+    // layers can both lazily call the upstream, whichever runs first sets the
+    // layer-run flag, and the second caller's lazy call is skipped — leaving
+    // its passref alloca unwritten.
+    //
+    // We check the union of all downstream layers connected to ANY output of
+    // the upstream layer.  If that set has more than one layer, passref is
+    // unsafe for any output of this upstream layer.
+    int sole_consumer_layer = -1;
     for (int dl = up_layer + 1; dl < group().nlayers(); ++dl) {
         ShaderInstance* dl_inst = group()[dl];
         if (dl_inst->unused() || dl_inst->empty_instance())
             continue;
         for (int c = 0, Nc = dl_inst->nconnections(); c < Nc; ++c) {
             const Connection& con = dl_inst->connection(c);
-            if (con.srclayer == up_layer && con.src.param == up_param) {
-                ++down_count;
-                if (down_count > 1)
-                    return false;
+            if (con.srclayer == up_layer) {
+                if (sole_consumer_layer == -1)
+                    sole_consumer_layer = dl;
+                else if (sole_consumer_layer != dl)
+                    return false;  // multiple layers call this upstream
             }
         }
     }
-    if (down_count != 1)
-        return false;
+    if (sole_consumer_layer < 0)
+        return false;  // no downstream connections at all
 
     if (upstream_layer_out)
         *upstream_layer_out = up_layer;

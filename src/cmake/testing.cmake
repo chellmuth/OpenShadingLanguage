@@ -299,7 +299,7 @@ macro (osl_add_all_tests)
                 gettextureinfo-udim gettextureinfo-udim-reg
                 globals-needed
                 group-outputs groupdata-opt groupstring
-                passref-opt
+                passref-dae-crash passref-opt
                 hash hashnoise hex hyperb
                 ieee_fp ieee_fp-reg if if-reg incdec initlist
                 initops initops-instance-clash
