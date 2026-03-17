@@ -2558,6 +2558,26 @@ BackendLLVM::run()
         }
     }
 
+    // Dump a Graphviz DOT graph of the shader group's layer connections.
+    if (shadingsys().dump_dot_graphs()) {
+        std::string safegroup;
+        safegroup = Strutil::replace(group().name(), "/", "_", true);
+        safegroup = Strutil::replace(safegroup, ":", "_", true);
+        if (safegroup.size() > 235)
+            safegroup = fmtformat("TRUNC_{}_{}",
+                                  safegroup.substr(safegroup.size() - 235),
+                                  group().id());
+        std::string name = fmtformat("dot_{}.dot", safegroup);
+        OIIO::ofstream out;
+        OIIO::Filesystem::open(out, name);
+        if (out) {
+            out << shadingsys().group_dot_graph(&group());
+            shadingsys().infofmt("Wrote DOT graph to '{}'", name);
+        } else {
+            shadingsys().errorfmt("Could not write DOT graph to '{}'", name);
+        }
+    }
+
 #if OSL_USE_OPTIX
     if (use_optix()) {
         ll.ptx_compile_group(nullptr, group().name().string(),

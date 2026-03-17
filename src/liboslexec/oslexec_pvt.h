@@ -661,6 +661,7 @@ public:
     int llvm_debugging_symbols() const { return m_llvm_debugging_symbols; }
     int llvm_profiling_events() const { return m_llvm_profiling_events; }
     int llvm_output_bitcode() const { return m_llvm_output_bitcode; }
+    int dump_dot_graphs() const { return m_dump_dot_graphs; }
     bool dump_forced_llvm_bool_symbols() const
     {
         return m_dump_forced_llvm_bool_symbols;
@@ -945,6 +946,7 @@ private:
     int m_llvm_debugging_symbols;  ///< Generate GDB compatible debug info during JIT
     int m_llvm_profiling_events;  ///< Emit Intel profiling events during JIT
     int m_llvm_output_bitcode;    ///< Output bitcode for each group
+    int m_dump_dot_graphs;        ///< Dump Graphviz DOT graph for each group
     int m_llvm_dumpasm;           ///< Output CPU asm of the JIT
     bool m_dump_forced_llvm_bool_symbols;  ///< Output symbols BatchedAnalsysis determined could be forced to be an llvm boolean
     bool m_dump_uniform_symbols;  ///< Output symbols BatchedAnalsysis determined are uniform

@@ -1139,6 +1139,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_llvm_debugging_symbols(0)
     , m_llvm_profiling_events(0)
     , m_llvm_output_bitcode(0)
+    , m_dump_dot_graphs(0)
     , m_llvm_dumpasm(0)
     , m_dump_forced_llvm_bool_symbols(0)
     , m_dump_uniform_symbols(0)
@@ -1673,6 +1674,7 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     ATTR_SET("llvm_debugging_symbols", int, m_llvm_debugging_symbols);
     ATTR_SET("llvm_profiling_events", int, m_llvm_profiling_events);
     ATTR_SET("llvm_output_bitcode", int, m_llvm_output_bitcode);
+    ATTR_SET("dump_dot_graphs", int, m_dump_dot_graphs);
     ATTR_SET("llvm_dumpasm", int, m_llvm_dumpasm);
     ATTR_SET("dump_forced_llvm_bool_symbols", int,
              m_dump_forced_llvm_bool_symbols);
@@ -1865,6 +1867,7 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE("llvm_debugging_symbols", int, m_llvm_debugging_symbols);
     ATTR_DECODE("llvm_profiling_events", int, m_llvm_profiling_events);
     ATTR_DECODE("llvm_output_bitcode", int, m_llvm_output_bitcode);
+    ATTR_DECODE("dump_dot_graphs", int, m_dump_dot_graphs);
     ATTR_DECODE("llvm_dumpasm", int, m_llvm_dumpasm);
     ATTR_DECODE("dump_forced_llvm_bool_symbols", int,
                 m_dump_forced_llvm_bool_symbols);
@@ -2604,6 +2607,7 @@ ShadingSystemImpl::getstats(int level) const
     BOOLOPT(llvm_debug_ops);
     BOOLOPT(llvm_target_host);
     BOOLOPT(llvm_output_bitcode);
+    BOOLOPT(dump_dot_graphs);
     BOOLOPT(llvm_dumpasm);
     BOOLOPT(llvm_prune_ir_strategy);
     BOOLOPT(lazylayers);
