@@ -2450,12 +2450,13 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
     bool is_jitted = group->jitted();
     int nlayers    = group->nlayers();
 
-    // Determine which layers have passref outputs — i.e. all their downstream
-    // connections go to exactly one consumer layer, and at least one of those
-    // connections is a complete connection from a can_treat_param_as_local
-    // output to a float-scalar input without derivs.  Mirrors the logic in
-    // BackendLLVM::is_passref_input / is_passref_output.
-    std::vector<bool> layer_has_passref_out(nlayers, false);
+    // Determine which layers have passref outputs and how many GroupData bytes
+    // they save.  Mirrors the logic in BackendLLVM::is_passref_input /
+    // is_passref_output: a layer qualifies when all its downstream connections
+    // go to exactly one consumer layer and at least one of those connections
+    // is a complete connection from a can_treat_param_as_local output to a
+    // float-scalar input without derivs.
+    std::vector<int> layer_passref_bytes(nlayers, 0);  // bytes saved per layer
     if (m_opt_passref && m_opt_groupdata) {
         for (int li = 0; li < nlayers; ++li) {
             ShaderInstance* inst = (*group)[li];
@@ -2483,7 +2484,7 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
             if (sole < 0)
                 goto next_layer;
 
-            // At least one eligible passref connection must exist.
+            // Count eligible passref connections to compute bytes saved.
             {
                 ShaderInstance* dl_inst = (*group)[sole];
                 for (int c = 0; c < dl_inst->nconnections(); ++c) {
@@ -2508,8 +2509,10 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
                         || dst_sym->typespec().aggregate() != TypeDesc::SCALAR
                         || dst_sym->has_derivs())
                         continue;
-                    layer_has_passref_out[li] = true;
-                    break;
+                    // Each removed float GroupData slot saves 4 bytes.
+                    layer_passref_bytes[li] += (int)dst_sym->typespec()
+                                                   .simpletype()
+                                                   .size();
                 }
             }
         next_layer:;
@@ -2524,15 +2527,18 @@ ShadingSystemImpl::group_dot_graph(ShaderGroup* group) const
 
     // One node per layer.
     for (int i = 0; i < nlayers; ++i) {
-        ShaderInstance* inst = (*group)[i];
-        std::string label    = fmtformat("{}\\n({})",
-                                         dot_escape(inst->layername()),
-                                         dot_escape(inst->shadername()));
+        ShaderInstance* inst    = (*group)[i];
+        int passref_bytes       = layer_passref_bytes[i];
+        std::string label       = fmtformat("{}\\n({})",
+                                            dot_escape(inst->layername()),
+                                            dot_escape(inst->shadername()));
+        if (passref_bytes > 0)
+            label += fmtformat("\\n-{} bytes GD", passref_bytes);
 
         const char* fill;
         if (is_jitted && (inst->unused() || inst->empty_instance()))
             fill = "#cccccc";  // gray   — dead after optimization
-        else if (layer_has_passref_out[i])
+        else if (passref_bytes > 0)
             fill = "#ffddaa";  // orange — passref upstream (extra ptr args)
         else if (inst->last_layer())
             fill = "#aaddaa";  // green  — implicit group entry (last layer)
