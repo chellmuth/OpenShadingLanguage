@@ -1241,12 +1241,91 @@ BackendLLVM::llvm_generate_debug_op_printf(const Opcode& op)
 
 
 bool
-BackendLLVM::build_llvm_code(int beginop, int endop, llvm::BasicBlock* bb)
+BackendLLVM::build_llvm_code(int beginop, int endop, llvm::BasicBlock* bb,
+                              bool emit_lifetime_markers)
 {
     if (bb)
         ll.set_insert_point(bb);
 
+    // When requested, pre-build per-op lifetime marker tables for all
+    // stack-allocated symbols (locals, temps, output-params-as-local).
+    // We compute the union of lifetime ranges across aliases that share
+    // the same alloca, then record (alloca_ptr, size_bytes) at the first
+    // and last op index of each range.
+    using LifetimePair = std::pair<llvm::Value*, int64_t>;
+    std::unordered_map<int, std::vector<LifetimePair>> lt_starts, lt_ends;
+    // Lifetime markers interact badly with debug_uninit: sentinel writes happen
+    // at function entry (before any firstuse op), and a lifetime.start after
+    // those writes allows LLVM to treat the sentinels as undefined.  Skip
+    // markers entirely when debug_uninit is active.
+    if (emit_lifetime_markers && shadingsys().debug_uninit())
+        emit_lifetime_markers = false;
+
+    if (emit_lifetime_markers) {
+        // Pass 1: compute per-alloca lifetime range (union across aliases).
+        // Key: dealiased mangled name.
+        std::unordered_map<std::string, std::pair<int, int>> alloca_ranges;
+        std::unordered_map<std::string, const Symbol*> alloca_sym;
+        for (auto&& s : inst()->symbols()) {
+            if (s.typespec().is_structure())
+                continue;
+            // Only locals and temps.  Skip can_treat_param_as_local output
+            // params: they may be read by the output-transfer loop that runs
+            // after build_llvm_code returns, so emitting lifetime.end at
+            // their lastuse() would allow stack slot reuse before that read.
+            if (!(s.symtype() == SymTypeLocal || s.symtype() == SymTypeTemp))
+                continue;
+            if (!s.everused())
+                continue;
+            int first = s.firstuse();
+            int last  = s.lastuse();
+            if (first > last)
+                continue;
+            // Skip if the symbol's lifetime is entirely outside our range.
+            if (first >= endop || last < beginop)
+                continue;
+            Symbol* dealiased   = s.dealias();
+            std::string key     = dealiased->mangled();
+            // Only emit if the alloca was actually created.
+            if (named_values().find(key) == named_values().end())
+                continue;
+            auto it = alloca_ranges.find(key);
+            if (it == alloca_ranges.end()) {
+                alloca_ranges[key] = { first, last };
+                alloca_sym[key]    = dealiased;
+            } else {
+                it->second.first  = std::min(it->second.first, first);
+                it->second.second = std::max(it->second.second, last);
+            }
+        }
+        // Pass 2: build the marker maps.
+        // Only emit lifetime.start when the first use is within [beginop, endop):
+        // symbols with init-code writes before beginop must not get a start marker,
+        // since lifetime.start would tell LLVM those prior writes are dead stores.
+        for (auto& [key, range] : alloca_ranges) {
+            int last = std::min(range.second, endop - 1);
+            if (last < beginop)
+                continue;
+            llvm::Value* ptr  = named_values()[key];
+            const Symbol* sym = alloca_sym[key];
+            int64_t sz        = (int64_t)llvm_typedesc(sym->typespec()).size()
+                                * (sym->has_derivs() ? 3 : 1);
+            // Emit start only when the combined firstuse is within our range.
+            if (range.first >= beginop)
+                lt_starts[range.first].emplace_back(ptr, sz);
+            lt_ends[last].emplace_back(ptr, sz);
+        }
+    }
+
     for (int opnum = beginop; opnum < endop; ++opnum) {
+        // Emit lifetime.start for all allocas whose lifetime begins here.
+        if (emit_lifetime_markers) {
+            auto it = lt_starts.find(opnum);
+            if (it != lt_starts.end())
+                for (auto& [ptr, sz] : it->second)
+                    ll.op_lifetime_start(ptr, sz);
+        }
+
         const Opcode& op        = inst()->ops()[opnum];
         const OpDescriptor* opd = shadingsys().op_descriptor(op.opname());
         if (opd && opd->llvmgen) {
@@ -1271,6 +1350,14 @@ BackendLLVM::build_llvm_code(int beginop, int endop, llvm::BasicBlock* bb)
                 "LLVMOSL: Unsupported op {} in layer {}\n", op.opname(),
                 inst()->layername());
             return false;
+        }
+
+        // Emit lifetime.end for all allocas whose lifetime ends here.
+        if (emit_lifetime_markers) {
+            auto it = lt_ends.find(opnum);
+            if (it != lt_ends.end())
+                for (auto& [ptr, sz] : it->second)
+                    ll.op_lifetime_end(ptr, sz);
         }
 
         // If the op we coded jumps around, skip past its recursive block
@@ -1725,7 +1812,8 @@ BackendLLVM::build_llvm_instance(bool groupentry)
     find_conditionals();
     m_call_layers_inserted.clear();
 
-    build_llvm_code(inst()->maincodebegin(), inst()->maincodeend());
+    build_llvm_code(inst()->maincodebegin(), inst()->maincodeend(), nullptr,
+                    /*emit_lifetime_markers=*/true);
 
     if (llvm_has_exit_instance_block())
         ll.op_branch(m_exit_instance_block);  // also sets insert point

@@ -838,6 +838,12 @@ public:
                                 const std::string& name = std::string(),
                                 int align               = 0);
 
+    /// Emit llvm.lifetime.start for an alloca.  size=-1 means "entire alloca".
+    void op_lifetime_start(llvm::Value* alloca_ptr, int64_t size = -1);
+
+    /// Emit llvm.lifetime.end for an alloca.  size=-1 means "entire alloca".
+    void op_lifetime_end(llvm::Value* alloca_ptr, int64_t size = -1);
+
     /// Generate code for a call to the function pointer, with the given
     /// arg list.  Return an llvm::Value* corresponding to the return
     /// value of the function, if any.

@@ -732,7 +732,6 @@ LLVMGEN(llvm_gen_print_fmt)
     llvm::Value* loaded_arg_values_on_stack
         = rop.ll.op_alloca(rop.ll.type_int8(), arg_values_size,
                            std::string("argValues"));
-
     int bytesToArg = 0;
     for (int argindex = 0; argindex < arg_count; ++argindex) {
         EncodedType et = encodedtypes[argindex];
@@ -794,6 +793,10 @@ LLVMGEN(llvm_gen_print_fmt)
         rs_func_name = "osl_formatfmt";
 
     llvm::Value* ret = rop.ll.call_function(rs_func_name, call_args);
+    if (arg_count > 0) {
+        rop.ll.op_lifetime_end(encodedtypes_on_stack, arg_count);
+        rop.ll.op_lifetime_end(loaded_arg_values_on_stack, arg_values_size);
+    }
 
     // The format op returns a string value, put in in the right spot
     if (op.opname() == op_format)
@@ -4043,9 +4046,11 @@ LLVMGEN(llvm_gen_pointcloud_search)
     args.push_back(rop.ll.void_ptr(types));   // attribute types array
     args.push_back(rop.ll.void_ptr(values));  // attribute values array
 
+    llvm::Value* local_indices = nullptr;
     if (!args[indicesArgumentIndex]) {
-        llvm::Value* indices = rop.ll.op_alloca(rop.ll.type_int(), capacity);
-        args[indicesArgumentIndex] = rop.ll.void_ptr(indices);
+        local_indices              = rop.ll.op_alloca(rop.ll.type_int(),
+                                                      capacity);
+        args[indicesArgumentIndex] = rop.ll.void_ptr(local_indices);
     }
 
     if (Max_points.is_constant()) {
@@ -4070,6 +4075,13 @@ LLVMGEN(llvm_gen_pointcloud_search)
     }
 
     llvm::Value* count = rop.ll.call_function("osl_pointcloud_search", args);
+    if (nattrs > 0) {
+        rop.ll.op_lifetime_end(names);
+        rop.ll.op_lifetime_end(types);
+        rop.ll.op_lifetime_end(values);
+    }
+    if (local_indices)
+        rop.ll.op_lifetime_end(local_indices);
     // Clear derivs if necessary
     for (size_t i = 0; i < clear_derivs_of.size(); ++i)
         rop.llvm_zero_derivs(*clear_derivs_of[i], count);
@@ -4169,6 +4181,11 @@ LLVMGEN(llvm_gen_pointcloud_write)
         rop.ll.void_ptr(values)         // attribute values array
     };
     llvm::Value* ret = rop.ll.call_function("osl_pointcloud_write", args);
+    if (nattrs > 0) {
+        rop.ll.op_lifetime_end(names);
+        rop.ll.op_lifetime_end(types);
+        rop.ll.op_lifetime_end(values);
+    }
     rop.llvm_store_value(ret, Result);
 
     return true;

@@ -69,7 +69,8 @@ public:
     /// Build up LLVM IR code for the given range [begin,end) or
     /// opcodes, putting them (initially) into basic block bb (or the
     /// current basic block if bb==NULL).
-    bool build_llvm_code(int beginop, int endop, llvm::BasicBlock* bb = NULL);
+    bool build_llvm_code(int beginop, int endop, llvm::BasicBlock* bb = NULL,
+                         bool emit_lifetime_markers = false);
 
     typedef std::map<std::string, llvm::Value*> AllocationMap;
 

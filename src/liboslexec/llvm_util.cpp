@@ -4438,6 +4438,32 @@ LLVM_Util::wide_op_alloca(const TypeDesc& type, int n, const std::string& name,
 
 
 
+void
+LLVM_Util::op_lifetime_start(llvm::Value* alloca_ptr, int64_t size)
+{
+    llvm::Function* func = getIntrinsicDeclaration(module(),
+                                                   llvm::Intrinsic::lifetime_start,
+                                                   { type_void_ptr() });
+    llvm::Value* args[2] = { llvm::ConstantInt::get(type_longlong(), size),
+                             alloca_ptr };
+    builder().CreateCall(func, toArrayRef(args));
+}
+
+
+
+void
+LLVM_Util::op_lifetime_end(llvm::Value* alloca_ptr, int64_t size)
+{
+    llvm::Function* func = getIntrinsicDeclaration(module(),
+                                                   llvm::Intrinsic::lifetime_end,
+                                                   { type_void_ptr() });
+    llvm::Value* args[2] = { llvm::ConstantInt::get(type_longlong(), size),
+                             alloca_ptr };
+    builder().CreateCall(func, toArrayRef(args));
+}
+
+
+
 llvm::Value*
 LLVM_Util::call_function(llvm::Value* func, cspan<llvm::Value*> args)
 {
