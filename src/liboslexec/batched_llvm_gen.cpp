@@ -280,6 +280,13 @@ LLVMGEN(llvm_gen_printf)
 
     OSL_ASSERT(format_sym.is_uniform());
 
+    if (rop.shadingsys().no_print()) {
+        if (op.opname() == "format")
+            rop.llvm_store_value(rop.ll.constant(ustring("")),
+                                 *rop.opargsym(op, 0));
+        return true;
+    }
+
     // For WIDE parameters we want to test the lane first to see
     // if we need to extract values or not
     struct DelayedExtraction {

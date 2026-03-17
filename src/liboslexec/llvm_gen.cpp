@@ -304,6 +304,13 @@ LLVMGEN(llvm_gen_printf_legacy)
         return false;
     }
 
+    if (rop.shadingsys().no_print()) {
+        if (op.opname() == op_format)
+            rop.llvm_store_value(rop.ll.constant(ustring("")),
+                                 *rop.opargsym(op, 0));
+        return true;
+    }
+
     // For some ops, we push the shader globals pointer
     if (op.opname() == op_printf || op.opname() == op_error
         || op.opname() == op_warning || op.opname() == op_fprintf)
@@ -532,6 +539,15 @@ LLVMGEN(llvm_gen_print_fmt)
         rop.shadingcontext()->warningfmt(
             "{} must currently have constant format\n", op.opname());
         return false;
+    }
+
+    if (rop.shadingsys().no_print()) {
+        // Profiling aid: skip all printf/error/warning/fprintf/format codegen.
+        // format() must still store a result.
+        if (op.opname() == op_format)
+            rop.llvm_store_value(rop.ll.constant(ustring("")),
+                                 *rop.opargsym(op, 0));
+        return true;
     }
 
     call_args.push_back(rop.sg_void_ptr());

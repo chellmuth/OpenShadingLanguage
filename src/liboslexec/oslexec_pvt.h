@@ -679,6 +679,7 @@ public:
     bool userdata_isconnected() const { return m_userdata_isconnected; }
     int profile() const { return m_profile; }
     bool no_noise() const { return m_no_noise; }
+    bool no_print() const { return m_no_print; }
     bool no_pointcloud() const { return m_no_pointcloud; }
     bool force_derivs() const { return m_force_derivs; }
     bool allow_shader_replacement() const { return m_allow_shader_replacement; }
@@ -968,6 +969,7 @@ private:
     int m_max_optix_groupdata_alloc;  ///< Maximum OptiX groupdata buffer allocation
     bool m_buffer_printf;             ///< Buffer/batch printf output?
     bool m_no_noise;                  ///< Substitute trivial noise calls
+    bool m_no_print;                  ///< Skip all printf/error/warning/format codegen
     bool m_no_pointcloud;             ///< Substitute trivial pointcloud calls
     bool m_force_derivs;              ///< Force derivs on everything
     bool m_allow_shader_replacement;  ///< Allow shader masters to replace

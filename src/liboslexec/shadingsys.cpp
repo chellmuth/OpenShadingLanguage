@@ -1132,6 +1132,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_max_optix_groupdata_alloc(0)
     , m_buffer_printf(true)
     , m_no_noise(false)
+    , m_no_print(false)
     , m_no_pointcloud(false)
     , m_force_derivs(false)
     , m_allow_shader_replacement(false)
@@ -1675,6 +1676,7 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     ATTR_SET("max_optix_groupdata_alloc", int, m_max_optix_groupdata_alloc);
     ATTR_SET("buffer_printf", int, m_buffer_printf);
     ATTR_SET("no_noise", int, m_no_noise);
+    ATTR_SET("no_print", int, m_no_print);
     ATTR_SET("no_pointcloud", int, m_no_pointcloud);
     ATTR_SET("force_derivs", int, m_force_derivs);
     ATTR_SET("allow_shader_replacement", int, m_allow_shader_replacement);
@@ -1875,6 +1877,7 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE("max_optix_groupdata_alloc", int, m_max_optix_groupdata_alloc);
     ATTR_DECODE("buffer_printf", int, m_buffer_printf);
     ATTR_DECODE("no_noise", int, m_no_noise);
+    ATTR_DECODE("no_print", int, m_no_print);
     ATTR_DECODE("no_pointcloud", int, m_no_pointcloud);
     ATTR_DECODE("force_derivs", int, m_force_derivs);
     ATTR_DECODE("allow_shader_replacement", int, m_allow_shader_replacement);
