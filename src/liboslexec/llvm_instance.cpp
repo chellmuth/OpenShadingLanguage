@@ -356,6 +356,42 @@ BackendLLVM::llvm_type_groupdata()
     // symbols with their offset within the group struct.
     m_param_order_map.clear();
     group().groupdata_layout_clear();
+
+    // Compute transitive upstream dependency bitsets for each layer.
+    // trans_deps[L][K] == true means layer K is a transitive dependency of L.
+    // Layers are in topological order so a single forward pass suffices.
+    int nlayers = group().nlayers();
+    std::vector<std::vector<bool>> trans_deps(nlayers,
+                                              std::vector<bool>(nlayers, false));
+    for (int lay = 0; lay < nlayers; ++lay) {
+        ShaderInstance* inst = group()[lay];
+        if (inst->unused())
+            continue;
+        for (auto& conn : inst->connections()) {
+            int src = conn.srclayer;
+            if (group()[src]->unused())
+                continue;
+            trans_deps[lay][src] = true;
+            for (int k = 0; k < nlayers; ++k)
+                if (trans_deps[src][k])
+                    trans_deps[lay][k] = true;
+        }
+    }
+
+    // Candidate slots for reuse: only SymTypeParam (input params) participate.
+    // Each slot tracks which layers own params assigned to it and the union of
+    // transitive deps of those layers (the "alive" set).
+    struct ReusableSlot {
+        int fieldnum;              // LLVM struct field index
+        int offset_bytes;          // byte offset in groupdata
+        int size;                  // total bytes (derivSize * sym.size())
+        size_t align;              // alignment requirement
+        std::vector<bool> owners;  // bitset: layers owning params in this slot
+        std::vector<bool> alive;   // bitset: union of trans_deps of owners
+    };
+    std::vector<ReusableSlot> reusable_slots;
+    const bool do_reuse = shadingsys().m_opt_groupdata_reuse;
+
     for (int layer = 0; layer < group().nlayers(); ++layer) {
         ShaderInstance* inst = group()[layer];
         if (inst->unused())
@@ -372,9 +408,6 @@ BackendLLVM::llvm_type_groupdata()
             const int arraylen  = std::max(1, sym.typespec().arraylength());
             const int derivSize = (sym.has_derivs() ? 3 : 1);
             ts.make_array(arraylen * derivSize);
-            fields.push_back(llvm_type(ts));
-            m_groupdata_field_names.emplace_back(
-                fmtformat("lay{}param_{}_", layer, sym.name()));
 
             // FIXME(arena) -- temporary debugging
             if (debug() && sym.symtype() == SymTypeOutputParam
@@ -389,24 +422,95 @@ BackendLLVM::llvm_type_groupdata()
             size_t align = sym.typespec().is_closure_based()
                                ? sizeof(void*)
                                : sym.typespec().simpletype().basesize();
-            if (offset & (align - 1))
-                offset += align - (offset & (align - 1));
-            if (llvm_debug() >= 2)
-                print("  {} ({}) {} {}, field {}, size {}, offset {}{}{}\n",
-                      inst->layername(), inst->id(), sym.mangled(), ts.c_str(),
-                      order, derivSize * int(sym.size()), offset,
-                      sym.interpolated() ? " (interpolated)" : "",
-                      sym.interactive() ? " (interactive)" : "");
-            sym.dataoffset((int)offset);
-            // TODO(arenas): sym.set_dataoffset(SymArena::Heap, offset);
-            group().groupdata_layout_push(inst->layername(), sym.name(),
-                                          sym.typespec().simpletype(),
-                                          (int)offset,
-                                          derivSize * (int)sym.size(),
-                                          sym.has_derivs());
-            offset += derivSize * sym.size();
-            m_param_order_map[&sym] = order;
-            ++order;
+            int param_size = derivSize * (int)sym.size();
+
+            // Try to reuse an existing slot for input params only.
+            // Output params (connected_down, renderer output, closure) are
+            // not reused here; their lifetime semantics are more complex.
+            int reuse_idx = -1;
+            if (do_reuse && sym.symtype() == SymTypeParam) {
+                for (int s = 0; s < (int)reusable_slots.size(); ++s) {
+                    auto& slot = reusable_slots[s];
+                    if (slot.size != param_size || slot.align != align)
+                        continue;
+                    // Lifetime check:
+                    //   (slot.alive | trans_deps[layer]) & (slot.owners | {layer}) == 0
+                    // This ensures no owning layer is a dependency of any other owner.
+                    // Same-layer params always conflict: their values must be
+                    // simultaneously available during that layer's execution.
+                    bool conflict = slot.owners[layer];
+                    for (int k = 0; k < nlayers && !conflict; ++k) {
+                        bool in_alive  = slot.alive[k] || trans_deps[layer][k];
+                        bool in_owners = slot.owners[k] || (k == layer);
+                        if (in_alive && in_owners)
+                            conflict = true;
+                    }
+                    if (!conflict) {
+                        reuse_idx = s;
+                        break;
+                    }
+                }
+            }
+
+            if (reuse_idx >= 0) {
+                // REUSE existing slot: share field index and byte offset.
+                auto& slot = reusable_slots[reuse_idx];
+                sym.dataoffset(slot.offset_bytes);
+                m_param_order_map[&sym] = slot.fieldnum;
+                slot.owners[layer] = true;
+                for (int k = 0; k < nlayers; ++k)
+                    if (trans_deps[layer][k])
+                        slot.alive[k] = true;
+                if (llvm_debug() >= 2)
+                    print(
+                        "  {} ({}) {} {}, REUSE field {}, size {}, offset {}{}{}\n",
+                        inst->layername(), inst->id(), sym.mangled(), ts.c_str(),
+                        slot.fieldnum, param_size, slot.offset_bytes,
+                        sym.interpolated() ? " (interpolated)" : "",
+                        sym.interactive() ? " (interactive)" : "");
+                group().groupdata_layout_push(inst->layername(), sym.name(),
+                                              sym.typespec().simpletype(),
+                                              slot.offset_bytes, param_size,
+                                              sym.has_derivs());
+            } else {
+                // NEW SLOT: existing path — align, add field, record offset.
+                if (offset & (align - 1))
+                    offset += align - (offset & (align - 1));
+                if (llvm_debug() >= 2)
+                    print(
+                        "  {} ({}) {} {}, field {}, size {}, offset {}{}{}\n",
+                        inst->layername(), inst->id(), sym.mangled(), ts.c_str(),
+                        order, param_size, offset,
+                        sym.interpolated() ? " (interpolated)" : "",
+                        sym.interactive() ? " (interactive)" : "");
+                fields.push_back(llvm_type(ts));
+                m_groupdata_field_names.emplace_back(
+                    fmtformat("lay{}param_{}_", layer, sym.name()));
+                sym.dataoffset((int)offset);
+                // TODO(arenas): sym.set_dataoffset(SymArena::Heap, offset);
+                group().groupdata_layout_push(inst->layername(), sym.name(),
+                                              sym.typespec().simpletype(),
+                                              (int)offset, param_size,
+                                              sym.has_derivs());
+                // Register input params as candidates for future slot reuse.
+                if (sym.symtype() == SymTypeParam) {
+                    ReusableSlot slot;
+                    slot.fieldnum    = order;
+                    slot.offset_bytes = (int)offset;
+                    slot.size        = param_size;
+                    slot.align       = align;
+                    slot.owners.assign(nlayers, false);
+                    slot.alive.assign(nlayers, false);
+                    slot.owners[layer] = true;
+                    for (int k = 0; k < nlayers; ++k)
+                        if (trans_deps[layer][k])
+                            slot.alive[k] = true;
+                    reusable_slots.push_back(std::move(slot));
+                }
+                offset += param_size;
+                m_param_order_map[&sym] = order;
+                ++order;
+            }
         }
     }
     group().llvm_groupdata_size(offset);

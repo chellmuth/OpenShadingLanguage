@@ -1109,6 +1109,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_opt_seed_bblock_aliases(true)
     , m_opt_useparam(false)
     , m_opt_groupdata(true)
+    , m_opt_groupdata_reuse(true)
 #if OSL_USE_BATCHED
     , m_opt_batched_analysis((renderer->batched(WidthOf<16>()) != nullptr)
                              || (renderer->batched(WidthOf<8>()) != nullptr)
@@ -1649,6 +1650,7 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     ATTR_SET("opt_seed_bblock_aliases", int, m_opt_seed_bblock_aliases);
     ATTR_SET("opt_useparam", int, m_opt_useparam);
     ATTR_SET("opt_groupdata", int, m_opt_groupdata);
+    ATTR_SET("opt_groupdata_reuse", int, m_opt_groupdata_reuse);
     ATTR_SET("opt_batched_analysis", int, m_opt_batched_analysis);
     ATTR_SET("llvm_jit_fma", int, m_llvm_jit_fma);
     ATTR_SET("llvm_jit_aggressive", int, m_llvm_jit_aggressive);
@@ -1840,6 +1842,7 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE("opt_seed_bblock_aliases", int, m_opt_seed_bblock_aliases);
     ATTR_DECODE("opt_useparam", int, m_opt_useparam);
     ATTR_DECODE("opt_groupdata", int, m_opt_groupdata);
+    ATTR_DECODE("opt_groupdata_reuse", int, m_opt_groupdata_reuse);
     ATTR_DECODE("opt_batched_analysis", int, m_opt_batched_analysis);
     ATTR_DECODE("llvm_jit_fma", int, m_llvm_jit_fma);
     ATTR_DECODE("llvm_jit_aggressive", int, m_llvm_jit_aggressive);
