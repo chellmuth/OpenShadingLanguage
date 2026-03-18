@@ -301,6 +301,7 @@ macro (osl_add_all_tests)
                 group-outputs groupdata-opt
                 groupdata-reuse-branches groupdata-reuse-chain
                 groupdata-reuse-diamond groupdata-reuse-global
+                groupdata-reuse-triple groupdata-reuse-types
                 groupdata-reuse-unconnected
                 groupstring
                 hash hashnoise hex hyperb
