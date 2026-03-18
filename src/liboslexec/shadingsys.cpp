@@ -2387,6 +2387,21 @@ ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
     const auto& sizes       = group->groupdata_sizes();
     const auto& has_derivs  = group->groupdata_has_derivs();
 
+    // Detect reused slots: a param at index i reuses a slot if any earlier param
+    // occupies the same byte range (same offset and size).
+    std::vector<int> reused_from(n, -1);  // reused_from[i] = index of first owner, or -1
+    int reuse_count = 0, reuse_bytes = 0;
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < i; ++j) {
+            if (offsets[i] == offsets[j] && sizes[i] == sizes[j]) {
+                reused_from[i] = j;
+                ++reuse_count;
+                reuse_bytes += sizes[i];
+                break;
+            }
+        }
+    }
+
     // Column widths
     int w_layer = 5, w_param = 5;
     for (int i = 0; i < n; ++i) {
@@ -2400,8 +2415,9 @@ ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
         << std::setw(14) << "type"
         << std::setw(8)  << "offset"
         << std::setw(8)  << "size"
-        << "derivs\n";
-    out << "  " << std::string(w_layer + w_param + 34, '-') << "\n";
+        << std::setw(8)  << "derivs"
+        << "note\n";
+    out << "  " << std::string(w_layer + w_param + 42, '-') << "\n";
 
     for (int i = 0; i < n; ++i) {
         out << "  " << std::left
@@ -2410,7 +2426,20 @@ ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
             << std::setw(14) << types[i]
             << std::setw(8)  << offsets[i]
             << std::setw(8)  << sizes[i]
-            << (has_derivs[i] ? "yes" : "no") << "\n";
+            << std::setw(8)  << (has_derivs[i] ? "yes" : "no");
+        if (reused_from[i] >= 0)
+            out << "reused from " << layer_names[reused_from[i]] << "."
+                << param_names[reused_from[i]];
+        out << "\n";
+    }
+
+    if (reuse_count > 0) {
+        int without_reuse = group->llvm_groupdata_size() + reuse_bytes;
+        out << "  Slot reuse: " << reuse_count << " param"
+            << (reuse_count > 1 ? "s reuse" : " reuses")
+            << " an existing slot, saving " << reuse_bytes << " bytes"
+            << " (" << group->llvm_groupdata_size() << " vs " << without_reuse
+            << " without reuse)\n";
     }
     return out.str();
 }
