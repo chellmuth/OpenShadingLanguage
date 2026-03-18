@@ -378,6 +378,35 @@ BackendLLVM::llvm_type_groupdata()
         }
     }
 
+    // Precompute: for each source layer U, does it feed exactly one distinct
+    // downstream layer?  If U feeds multiple layers, it can be triggered early
+    // by any of them, causing its output-transfer write to a shared slot to
+    // happen long before the intended consumer reads the slot.  Only slots
+    // whose source has a single downstream are safe to reuse.
+    std::vector<bool> src_single_downstream(nlayers, false);
+    {
+        std::vector<int> src_dst_count(nlayers, 0);
+        std::vector<int> src_first_dst(nlayers, -1);
+        for (int lay = 0; lay < nlayers; ++lay) {
+            ShaderInstance* dinst = group()[lay];
+            if (dinst->unused())
+                continue;
+            for (auto& conn : dinst->connections()) {
+                int src = conn.srclayer;
+                if (group()[src]->unused())
+                    continue;
+                if (src_first_dst[src] == -1) {
+                    src_first_dst[src] = lay;
+                    src_dst_count[src] = 1;
+                } else if (src_first_dst[src] != lay) {
+                    src_dst_count[src] = 2;  // multiple; no need to count more
+                }
+            }
+        }
+        for (int k = 0; k < nlayers; ++k)
+            src_single_downstream[k] = (src_dst_count[k] == 1);
+    }
+
     // Candidate slots for reuse: only SymTypeParam (input params) participate.
     // Each slot tracks which layers own params assigned to it and the union of
     // transitive deps of those layers (the "alive" set).
@@ -424,11 +453,26 @@ BackendLLVM::llvm_type_groupdata()
                                : sym.typespec().simpletype().basesize();
             int param_size = derivSize * (int)sym.size();
 
+            // Find the source layer for this connected input param.
+            // The source layer is the upstream layer whose output-transfer
+            // writes this slot; its single-downstream property determines
+            // whether the slot is safe to reuse.
+            int src_layer = -1;
+            if (sym.symtype() == SymTypeParam && sym.connected()) {
+                for (auto& conn : inst->connections()) {
+                    if (inst->symbol(conn.dst.param) == &sym) {
+                        src_layer = conn.srclayer;
+                        break;
+                    }
+                }
+            }
+
             // Try to reuse an existing slot for input params only.
             // Output params (connected_down, renderer output, closure) are
             // not reused here; their lifetime semantics are more complex.
             int reuse_idx = -1;
-            if (do_reuse && sym.symtype() == SymTypeParam && sym.connected()) {
+            if (do_reuse && sym.symtype() == SymTypeParam && sym.connected()
+                && src_layer >= 0 && src_single_downstream[src_layer]) {
                 for (int s = 0; s < (int)reusable_slots.size(); ++s) {
                     auto& slot = reusable_slots[s];
                     if (slot.size != param_size || slot.align != align)
@@ -493,11 +537,13 @@ BackendLLVM::llvm_type_groupdata()
                                               (int)offset, param_size,
                                               sym.has_derivs());
                 // Register input params as candidates for future slot reuse.
-                // Only connected params participate: unconnected (renderer-set
-                // or default) params have their values written before execution
-                // begins and no connection copy will refresh them, so a
-                // concurrent independent layer could overwrite the slot.
-                if (sym.symtype() == SymTypeParam && sym.connected()) {
+                // Only connected params whose source layer feeds exactly one
+                // downstream layer participate.  If the source feeds multiple
+                // layers it may be triggered early (via another path), writing
+                // the slot long before this layer reads it, during which time
+                // another owner's source could overwrite the slot.
+                if (sym.symtype() == SymTypeParam && sym.connected()
+                    && src_layer >= 0 && src_single_downstream[src_layer]) {
                     ReusableSlot slot;
                     slot.fieldnum    = order;
                     slot.offset_bytes = (int)offset;
