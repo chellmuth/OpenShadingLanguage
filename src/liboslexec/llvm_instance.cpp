@@ -428,7 +428,7 @@ BackendLLVM::llvm_type_groupdata()
             // Output params (connected_down, renderer output, closure) are
             // not reused here; their lifetime semantics are more complex.
             int reuse_idx = -1;
-            if (do_reuse && sym.symtype() == SymTypeParam) {
+            if (do_reuse && sym.symtype() == SymTypeParam && sym.connected()) {
                 for (int s = 0; s < (int)reusable_slots.size(); ++s) {
                     auto& slot = reusable_slots[s];
                     if (slot.size != param_size || slot.align != align)
@@ -493,7 +493,11 @@ BackendLLVM::llvm_type_groupdata()
                                               (int)offset, param_size,
                                               sym.has_derivs());
                 // Register input params as candidates for future slot reuse.
-                if (sym.symtype() == SymTypeParam) {
+                // Only connected params participate: unconnected (renderer-set
+                // or default) params have their values written before execution
+                // begins and no connection copy will refresh them, so a
+                // concurrent independent layer could overwrite the slot.
+                if (sym.symtype() == SymTypeParam && sym.connected()) {
                     ReusableSlot slot;
                     slot.fieldnum    = order;
                     slot.offset_bytes = (int)offset;

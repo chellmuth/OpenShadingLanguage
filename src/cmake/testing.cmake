@@ -301,6 +301,7 @@ macro (osl_add_all_tests)
                 group-outputs groupdata-opt
                 groupdata-reuse-branches groupdata-reuse-chain
                 groupdata-reuse-diamond groupdata-reuse-global
+                groupdata-reuse-unconnected
                 groupstring
                 hash hashnoise hex hyperb
                 ieee_fp ieee_fp-reg if if-reg incdec initlist
