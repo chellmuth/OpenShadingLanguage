@@ -1109,6 +1109,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_opt_seed_bblock_aliases(true)
     , m_opt_useparam(false)
     , m_opt_groupdata(true)
+    , m_opt_groupdata_alias_connections(true)
 #if OSL_USE_BATCHED
     , m_opt_batched_analysis((renderer->batched(WidthOf<16>()) != nullptr)
                              || (renderer->batched(WidthOf<8>()) != nullptr)
@@ -1649,6 +1650,7 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     ATTR_SET("opt_seed_bblock_aliases", int, m_opt_seed_bblock_aliases);
     ATTR_SET("opt_useparam", int, m_opt_useparam);
     ATTR_SET("opt_groupdata", int, m_opt_groupdata);
+    ATTR_SET("opt_groupdata_alias_connections", int, m_opt_groupdata_alias_connections);
     ATTR_SET("opt_batched_analysis", int, m_opt_batched_analysis);
     ATTR_SET("llvm_jit_fma", int, m_llvm_jit_fma);
     ATTR_SET("llvm_jit_aggressive", int, m_llvm_jit_aggressive);
@@ -1840,6 +1842,7 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE("opt_seed_bblock_aliases", int, m_opt_seed_bblock_aliases);
     ATTR_DECODE("opt_useparam", int, m_opt_useparam);
     ATTR_DECODE("opt_groupdata", int, m_opt_groupdata);
+    ATTR_DECODE("opt_groupdata_alias_connections", int, m_opt_groupdata_alias_connections);
     ATTR_DECODE("opt_batched_analysis", int, m_opt_batched_analysis);
     ATTR_DECODE("llvm_jit_fma", int, m_llvm_jit_fma);
     ATTR_DECODE("llvm_jit_aggressive", int, m_llvm_jit_aggressive);
@@ -2383,6 +2386,17 @@ ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
     const auto& offsets     = group->groupdata_offsets();
     const auto& sizes       = group->groupdata_sizes();
     const auto& has_derivs  = group->groupdata_has_derivs();
+    const auto& notes       = group->groupdata_notes();
+
+    // Count reused slots and bytes saved
+    int reuse_count = 0;
+    int bytes_saved = 0;
+    for (int i = 0; i < n; ++i) {
+        if (!notes[i].empty()) {
+            ++reuse_count;
+            bytes_saved += sizes[i];
+        }
+    }
 
     // Column widths
     int w_layer = 5, w_param = 5;
@@ -2397,8 +2411,9 @@ ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
         << std::setw(14) << "type"
         << std::setw(8)  << "offset"
         << std::setw(8)  << "size"
-        << "derivs\n";
-    out << "  " << std::string(w_layer + w_param + 34, '-') << "\n";
+        << std::setw(8)  << "derivs"
+        << "note\n";
+    out << "  " << std::string(w_layer + w_param + 42, '-') << "\n";
 
     for (int i = 0; i < n; ++i) {
         out << "  " << std::left
@@ -2407,8 +2422,20 @@ ShadingSystemImpl::groupdata_layout_report(ShaderGroup* group) const
             << std::setw(14) << types[i]
             << std::setw(8)  << offsets[i]
             << std::setw(8)  << sizes[i]
-            << (has_derivs[i] ? "yes" : "no") << "\n";
+            << std::setw(8)  << (has_derivs[i] ? "yes" : "no")
+            << notes[i] << "\n";
     }
+
+    if (reuse_count > 0) {
+        int total_with_reuse    = group->llvm_groupdata_size();
+        int total_without_reuse = total_with_reuse + bytes_saved;
+        out << "Slot reuse: " << reuse_count << " param"
+            << (reuse_count == 1 ? " reuses" : "s reuse")
+            << " an existing slot, saving " << bytes_saved << " bytes ("
+            << total_with_reuse << " vs " << total_without_reuse
+            << " without reuse)\n";
+    }
+
     return out.str();
 }
 

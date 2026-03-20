@@ -351,6 +351,43 @@ BackendLLVM::llvm_type_groupdata()
         }
     }
 
+    // Pre-pass: identify input params that can share their source output's
+    // GroupData slot.  Eligible connections are whole-param (no array index,
+    // no channel), with an exact OSL type match between source and consumer.
+    // Source layers are always processed before consumer layers (topological
+    // order), so by the time we encounter a consumer input the source output
+    // will already have its fieldnum assigned.
+    // Key: consumer Symbol* -> source output Symbol*.
+    std::unordered_map<const Symbol*, const Symbol*> input_shares_output;
+    if (shadingsys().m_opt_groupdata_alias_connections) {
+        for (int lay = 0; lay < group().nlayers(); ++lay) {
+            ShaderInstance* consumer = group()[lay];
+            if (consumer->unused())
+                continue;
+            for (int c = 0; c < consumer->nconnections(); ++c) {
+                const Connection& con = consumer->connection(c);
+                if (con.src.arrayindex != -1 || con.dst.arrayindex != -1)
+                    continue;
+                if (con.src.channel != -1 || con.dst.channel != -1)
+                    continue;
+                ShaderInstance* srcInst = group()[con.srclayer];
+                if (!srcInst || srcInst->unused())
+                    continue;
+                Symbol* srcsym = srcInst->symbol(con.src.param);
+                Symbol* dstsym = consumer->symbol(con.dst.param);
+                if (!srcsym || !dstsym)
+                    continue;
+                // Source output must have a GroupData slot (not on stack).
+                if (can_treat_param_as_local(*srcsym))
+                    continue;
+                // Exact type match required.
+                if (srcsym->typespec() != dstsym->typespec())
+                    continue;
+                input_shares_output[dstsym] = srcsym;
+            }
+        }
+    }
+
     // For each layer in the group, add entries for all params that are
     // connected or interpolated, and output params.  Also mark those
     // symbols with their offset within the group struct.
@@ -368,6 +405,42 @@ BackendLLVM::llvm_type_groupdata()
 
             if (can_treat_param_as_local(sym))
                 continue;
+
+            // If this input param shares its source output's GroupData slot,
+            // reuse that slot instead of allocating a new one.
+            auto share_it = input_shares_output.find(&sym);
+            if (share_it != input_shares_output.end()) {
+                const Symbol* srcsym = share_it->second;
+                auto field_it        = m_param_order_map.find(srcsym);
+                if (field_it != m_param_order_map.end()) {
+                    // Point this input at the source output's existing slot.
+                    sym.dataoffset(srcsym->dataoffset());
+                    m_param_order_map[&sym] = field_it->second;
+                    // Find the source layer name for the report note.
+                    ustring src_layer_name;
+                    for (int sl = 0; sl < group().nlayers(); ++sl) {
+                        ShaderInstance* si = group()[sl];
+                        if (si && !si->unused()) {
+                            FOREACH_PARAM(Symbol & ps, si)
+                            {
+                                if (&ps == srcsym) {
+                                    src_layer_name = si->layername();
+                                    goto found_src_layer;
+                                }
+                            }
+                        }
+                    }
+                found_src_layer:
+                    group().groupdata_layout_push(
+                        inst->layername(), sym.name(),
+                        sym.typespec().simpletype(), srcsym->dataoffset(),
+                        (sym.has_derivs() ? 3 : 1) * (int)sym.size(),
+                        sym.has_derivs(),
+                        fmtformat("reused from {}.{}", src_layer_name,
+                                  srcsym->name()));
+                    continue;
+                }
+            }
 
             const int arraylen  = std::max(1, sym.typespec().arraylength());
             const int derivSize = (sym.has_derivs() ? 3 : 1);
@@ -1798,6 +1871,17 @@ BackendLLVM::build_llvm_instance(bool groupentry)
                 // llvm_run_connected_layers tracks layers that have been run,
                 // so no need to do it here as well
                 llvm_run_connected_layers(*srcsym, con.src.param);
+
+                // If src and dst share the same GroupData slot (opt_groupdata_alias_connections),
+                // the value is already in place — no copy needed.
+                {
+                    auto src_it = m_param_order_map.find(srcsym);
+                    auto dst_it = m_param_order_map.find(dstsym);
+                    if (src_it != m_param_order_map.end()
+                        && dst_it != m_param_order_map.end()
+                        && src_it->second == dst_it->second)
+                        continue;
+                }
 
                 // FIXME -- I'm not sure I understand this.  Isn't this
                 // unnecessary if we wrote to the parameter ourself?

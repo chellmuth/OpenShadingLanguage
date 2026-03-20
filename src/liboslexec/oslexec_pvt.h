@@ -927,7 +927,8 @@ private:
     bool m_opt_texture_handle;       ///< Use texture handles?
     bool m_opt_seed_bblock_aliases;  ///< Turn on basic block alias seeds
     bool m_opt_useparam;  ///< Perform extra useparam analysis for culling run layer calls
-    bool m_opt_groupdata;  ///< Move eligible parameters out of groupdata into locals
+    bool m_opt_groupdata;        ///< Move eligible parameters out of groupdata into locals
+    bool m_opt_groupdata_alias_connections;  ///< Alias connected inputs to their source output's slot
     bool m_opt_batched_analysis;  ///< Perform extra analysis required for batched execution?
     bool m_llvm_jit_fma;         ///< Allow fused multiply/add in JIT
     bool m_llvm_jit_aggressive;  ///< Turn on llvm "aggressive" JIT
@@ -1798,6 +1799,10 @@ public:
     {
         return m_groupdata_has_derivs;
     }
+    const std::vector<std::string>& groupdata_notes() const
+    {
+        return m_groupdata_notes;
+    }
     int num_groupdata_fields() const
     {
         return (int)m_groupdata_layer_names.size();
@@ -1811,10 +1816,11 @@ public:
         m_groupdata_offsets.clear();
         m_groupdata_sizes.clear();
         m_groupdata_has_derivs.clear();
+        m_groupdata_notes.clear();
     }
     void groupdata_layout_push(ustring layer_name, ustring param_name,
                                TypeDesc type, int offset, int size,
-                               bool has_derivs)
+                               bool has_derivs, std::string note = {})
     {
         m_groupdata_layer_names.push_back(layer_name);
         m_groupdata_param_names.push_back(param_name);
@@ -1822,6 +1828,7 @@ public:
         m_groupdata_offsets.push_back(offset);
         m_groupdata_sizes.push_back(size);
         m_groupdata_has_derivs.push_back((char)has_derivs);
+        m_groupdata_notes.push_back(std::move(note));
     }
 
     size_t llvm_groupdata_wide_size() const
@@ -2080,6 +2087,7 @@ private:
     std::vector<int>     m_groupdata_offsets;
     std::vector<int>     m_groupdata_sizes;
     std::vector<char>    m_groupdata_has_derivs;
+    std::vector<std::string> m_groupdata_notes;
     int m_id;                    ///< Unique ID for the group
     int m_num_entry_layers = 0;  ///< Number of marked entry layers
     RunLLVMGroupFunc m_llvm_compiled_version = nullptr;

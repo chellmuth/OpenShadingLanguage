@@ -284,8 +284,14 @@ BackendLLVM::can_treat_param_as_local(const Symbol& sym)
     // Some output parameters that are never needed before or
     // after layer execution can be relocated from GroupData
     // onto the stack.
-    return sym.symtype() == SymTypeOutputParam && !sym.renderer_output()
-           && !sym.typespec().is_closure_based() && !sym.connected();
+    // Exception: when opt_groupdata_alias_connections is enabled, connected-down outputs
+    // stay in GroupData so that downstream consumers can share the same slot.
+    if (sym.symtype() != SymTypeOutputParam || sym.renderer_output()
+        || sym.typespec().is_closure_based() || sym.connected())
+        return false;
+    if (shadingsys().m_opt_groupdata_alias_connections && sym.connected_down())
+        return false;
+    return true;
 }
 
 llvm::Value*

@@ -298,7 +298,8 @@ macro (osl_add_all_tests)
                 getsymbol-nonheap gettextureinfo gettextureinfo-reg
                 gettextureinfo-udim gettextureinfo-udim-reg
                 globals-needed
-                group-outputs groupdata-opt groupstring
+                group-outputs groupdata-alias-fanout groupdata-alias-mismatch
+                groupdata-opt groupstring
                 hash hashnoise hex hyperb
                 ieee_fp ieee_fp-reg if if-reg incdec initlist
                 initops initops-instance-clash
