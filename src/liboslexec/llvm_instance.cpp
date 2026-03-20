@@ -383,6 +383,12 @@ BackendLLVM::llvm_type_groupdata()
                 // Exact type match required.
                 if (srcsym->typespec() != dstsym->typespec())
                     continue;
+                // Deriv requirements propagate upstream during optimization,
+                // so dstsym->has_derivs() => srcsym->has_derivs(). The reverse
+                // (srcsym has derivs, dstsym doesn't) is harmless to alias:
+                // dstsym reads only the base value at offset 0 of the larger slot.
+                OSL_DASSERT(!(dstsym->has_derivs() && !srcsym->has_derivs())
+                            && "deriv propagation invariant violated");
                 input_shares_output[dstsym] = srcsym;
             }
         }
