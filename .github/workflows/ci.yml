@@ -355,6 +355,7 @@ jobs:
             setenvs: export OSL_CMAKE_FLAGS="-DOSL_BUILD_TESTS=0 -DBUILD_TESTING=OFF -DUSE_QT=0"
                             OPENIMAGEIO_CMAKE_FLAGS="-DUSE_PYTHON=0"
                             CMAKE_BUILD_TYPE=RelWithDebInfo
+                            OpenImageIO_DEPENDENCY_BUILD_ALLOW_UNVERIFIED_TAGS=ON
 
           - desc: icc/C++17 llvm14 py3.9 oiio-main avx2
             nametag: linux-icc
@@ -487,6 +488,7 @@ jobs:
                             PTEX_VERSION=v2.4.3
                             PUGIXML_VERSION=v1.15
                             FREETYPE_VERSION=VER-2-14-3
+                            OpenImageIO_DEPENDENCY_BUILD_ALLOW_UNVERIFIED_TAGS=ON
           - desc: clang14/C++17 llvm14 py3.10 avx2 batch-b16avx512
             nametag: linux-clang14
             runner: ubuntu-22.04
@@ -563,23 +565,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desc: MacOS-15-Intel aclang17/C++17/py3.13 llvm17 oiio-release
+          - desc: MacOS-15-Intel aclang17/C++17/py3.13 llvm18 oiio-release
             runner: macos-15-intel
             nametag: macos15-p313
-            cc_compiler: clang
-            cxx_compiler: clang++
+            cc_compiler: /usr/bin/clang
+            cxx_compiler: /usr/bin/clang++
             cxx_std: 17
             openimageio_ver: dev-3.0
             python_ver: "3.13"
             ctest_test_timeout: 120
             setenvs: export HOMEBREW_PREFIX=/usr/local
-                            LLVMBREWVER="@17"
-                            USE_OPENVDB=0
+                            LLVMBREWVER="@18"
+                            INSTALL_OPENVDB=0 INSTALL_QT=0
           - desc: MacOS-14-ARM llvm19 oiio-release
             runner: macos-14
             nametag: macos14-arm-p313
-            cc_compiler: clang
-            cxx_compiler: clang++
+            cc_compiler: /usr/bin/clang
+            cxx_compiler: /usr/bin/clang++
             cxx_std: 17
             openimageio_ver: main
             python_ver: "3.13"
@@ -587,8 +589,8 @@ jobs:
           - desc: MacOS-15-ARM aclang16/C++17/py3.13 llvm21 oiio-main
             runner: macos-15
             nametag: macos15-arm-py313
-            cc_compiler: clang
-            cxx_compiler: clang++
+            cc_compiler: /usr/bin/clang
+            cxx_compiler: /usr/bin/clang++
             cxx_std: 17
             python_ver: "3.13"
             openimageio_ver: main
@@ -648,12 +650,25 @@ jobs:
                             OpenImageIO_BUILD_MISSING_DEPS="Freetype;TIFF;libdeflate;libjpeg-turbo"
                             LLVM_GOOGLE_DRIVE_ID="1uy7PNVlTQ-H56unXGOS6siRWtNcdS1J7"
           - desc: Windows-2025 VS2022 llvm20 oiio3.1
-            runner: windows-2025
-            nametag: windows-2025
+            runner: windows-2025-vs2022
+            nametag: windows-2025-vs2022
             generator: "Visual Studio 17 2022"
             python_ver: "3.12"
             opencolorio_ver: v2.3.2
             openexr_ver: v3.3.2
+            openimageio_ver: release
+            skip_tests: 1
+            setenvs: export OSL_CMAKE_FLAGS="-DUSE_LLVM_BTCODE=ON"
+                            PUGIXML_VERSION=v1.14
+                            OpenImageIO_BUILD_MISSING_DEPS="Freetype;TIFF;libdeflate;libjpeg-turbo"
+                            LLVM_GOOGLE_DRIVE_ID="1uy7PNVlTQ-H56unXGOS6siRWtNcdS1J7"
+          - desc: Windows-2025 VS2026
+            runner: windows-2025-vs2026
+            nametag: windows-2025-vs2026
+            generator: "Visual Studio 18 2026"
+            python_ver: "3.12"
+            opencolorio_ver: v2.5.1
+            openexr_ver: v3.4.5
             openimageio_ver: release
             skip_tests: 1
             setenvs: export OSL_CMAKE_FLAGS="-DUSE_LLVM_BTCODE=ON"
